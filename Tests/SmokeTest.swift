@@ -120,6 +120,14 @@ struct SmokeTest {
         expect(state.4 == true, "real connection failure is detected")
         expect(state.5.count < 300, "failure alert stays concise")
         expect(!state.5.contains("原始日志"), "failure alert does not dump the raw log")
+
+        let licenseState = await MainActor.run { () -> (Bool, AppAlert) in
+            let log = "ERROR rdp_client_connect_license: license connection sequence aborted. ERRCONNECT_CONNECT_TRANSPORT_FAILED"
+            return (store.looksLikeFailure(log), store.failureAlert(displayName: "HNK-SV-MES103", port: 3389, log: log))
+        }
+        expect(licenseState.0, "license/transport failure is detected")
+        expect(licenseState.1.message.contains("许可"), "license failure has a specific short message")
+        expect(licenseState.1.message.count < 300, "license alert stays concise")
         expect(state.0 == 0, "session cleaned up after failure")
         expect(state.1 != nil, "connection failure surfaced as an alert")
         print("lastError: \(state.1 ?? "nil")")

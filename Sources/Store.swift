@@ -377,8 +377,7 @@ final class Store: ObservableObject {
         let pcID = pc.id
         let displayName = pc.name.isEmpty ? pc.host : pc.name
         let launchedAt = Date()
-        process.terminationHandler = { [weak self] finished in
-            let status = finished.terminationStatus
+        process.terminationHandler = { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.monitors[pcID]?.invalidate()
@@ -389,7 +388,7 @@ final class Store: ObservableObject {
                 self.logHandles[pcID] = nil
                 self.cleanupAskpass(for: pcID)
 
-                if status != 0 && !self.failureHandled.contains(pcID) && !self.ignoredExitIDs.contains(pcID) {
+                if !self.failureHandled.contains(pcID) && !self.ignoredExitIDs.contains(pcID) {
                     let tail = self.logTail(at: logURL)
                     let ranLongEnoughToBeARealSession = Date().timeIntervalSince(launchedAt) > 10
                     let certificateFailure = !ranLongEnoughToBeARealSession
@@ -469,7 +468,7 @@ final class Store: ObservableObject {
         monitors[pcID] = timer
     }
 
-    private func failureAlert(displayName: String, port: Int, log: String) -> AppAlert {
+    func failureAlert(displayName: String, port: Int, log: String) -> AppAlert {
         let lower = log.lowercased()
 
         if lower.contains("host key verification failed") {
@@ -495,6 +494,15 @@ final class Store: ObservableObject {
             return AppAlert(
                 title: "无法连接到 \(displayName)",
                 message: "目标端口 \(port) 没有接受连接。请确认远程桌面已开启、端口正确，并且防火墙已放行。",
+                showLogs: true
+            )
+        }
+
+        if lower.contains("license connection sequence aborted") || lower.contains("state_run_failed")
+            || lower.contains("errconnect_connect_transport_failed") || lower.contains("freerdp_post_connect failed") {
+            return AppAlert(
+                title: "\(displayName) 连接被服务器中止",
+                message: "服务器在 RDP 许可/传输阶段中止了连接。请确认目标是 Windows 专业版/企业版或 Windows Server，远程桌面许可和会话限制正常。",
                 showLogs: true
             )
         }
@@ -537,6 +545,7 @@ final class Store: ObservableObject {
         let markers = [
             "failed to connect",
             "errconnect_connect_failed",
+            "errconnect_connect_transport_failed",
             "errconnect_authentication_failed",
             "errconnect_logon_failure",
             "errconnect_password_expired",
@@ -548,6 +557,9 @@ final class Store: ObservableObject {
             "authentication failure",
             "logon failure",
             "nla authentication failed",
+            "license connection sequence aborted",
+            "state_run_failed",
+            "freerdp_post_connect failed",
             "connection refused"
         ]
         return markers.contains { lower.contains($0) }
