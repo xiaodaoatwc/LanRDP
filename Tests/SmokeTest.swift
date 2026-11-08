@@ -107,10 +107,19 @@ struct SmokeTest {
         let state = await MainActor.run {
             let cancelled = store.looksLikeFailure("ERRCONNECT_CONNECT_CANCELLED")
             let failed = store.looksLikeFailure("ERRCONNECT_CONNECT_FAILED")
-            return (store.activeSessionIDs.count, store.lastError?.title, store.pcs.count, cancelled, failed)
+            return (
+                store.activeSessionIDs.count,
+                store.lastError?.title,
+                store.pcs.count,
+                cancelled,
+                failed,
+                store.lastError?.message ?? ""
+            )
         }
         expect(state.3 == false, "normal user cancellation is not a failure")
         expect(state.4 == true, "real connection failure is detected")
+        expect(state.5.count < 300, "failure alert stays concise")
+        expect(!state.5.contains("原始日志"), "failure alert does not dump the raw log")
         expect(state.0 == 0, "session cleaned up after failure")
         expect(state.1 != nil, "connection failure surfaced as an alert")
         print("lastError: \(state.1 ?? "nil")")

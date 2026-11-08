@@ -395,7 +395,7 @@ final class Store: ObservableObject {
                     let certificateFailure = !ranLongEnoughToBeARealSession
                         && tail.lowercased().contains("host key verification failed")
                     if self.looksLikeFailure(tail) || certificateFailure {
-                        self.lastError = self.failureAlert(displayName: displayName, log: tail)
+                        self.lastError = self.failureAlert(displayName: displayName, port: pc.port, log: tail)
                     }
                 }
                 self.failureHandled.remove(pcID)
@@ -421,14 +421,14 @@ final class Store: ObservableObject {
         logHandles[pc.id] = logHandle
         logURLs[pc.id] = logURL
         activeSessionIDs.insert(pc.id)
-        startFailureMonitor(pcID: pc.id, logURL: logURL, displayName: displayName)
+        startFailureMonitor(pcID: pc.id, logURL: logURL, displayName: displayName, port: pc.port)
 
         if let index = pcs.firstIndex(where: { $0.id == pc.id }) {
             pcs[index].lastConnected = Date()
         }
     }
 
-    private func startFailureMonitor(pcID: UUID, logURL: URL, displayName: String) {
+    private func startFailureMonitor(pcID: UUID, logURL: URL, displayName: String, port: Int) {
         let started = Date()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -457,6 +457,7 @@ final class Store: ObservableObject {
                 self.activeSessionIDs.remove(pcID)
                 self.lastError = self.failureAlert(
                     displayName: displayName,
+                    port: port,
                     log: tail.isEmpty ? "sdl-freerdp 报告连接失败" : tail
                 )
                 if running.isRunning {
@@ -468,28 +469,67 @@ final class Store: ObservableObject {
         monitors[pcID] = timer
     }
 
-    private func failureAlert(displayName: String, log: String) -> AppAlert {
+    private func failureAlert(displayName: String, port: Int, log: String) -> AppAlert {
         let lower = log.lowercased()
+
         if lower.contains("host key verification failed") {
             return AppAlert(
                 title: "\(displayName) 的证书已变化",
-                message: "这台 Windows 的 RDP 证书和之前保存的不一致。\n\n如果是你自己重装了 Windows 或重置了远程桌面，请编辑这台电脑，点“清除此电脑的证书缓存”，然后重新连接；也可以临时把证书策略改为“忽略证书错误”。\n\n原始日志：\n\(log)"
+                message: "如果这是你自己的电脑，编辑这台 PC，点“清除此电脑的证书缓存”，或把证书策略改为“忽略证书错误”。",
+                showLogs: false
             )
         }
-        if lower.contains("connection refused") {
-            return AppAlert(
-                title: "无法连接 \(displayName)",
-                message: "对方 3389 端口拒绝连接。请确认 Windows 已开启远程桌面、防火墙允许 3389，并且目标不是 Windows 家庭版。\n\n原始日志：\n\(log)"
-            )
-        }
+
         if lower.contains("logon failure") || lower.contains("authentication failure")
-            || lower.contains("nla authentication failed") || lower.contains("errconnect_authentication_failed") {
+            || lower.contains("nla authentication failed") || lower.contains("errconnect_authentication_failed")
+            || lower.contains("errconnect_logon_failure") || lower.contains("errconnect_password")
+            || lower.contains("errconnect_account") {
             return AppAlert(
                 title: "\(displayName) 登录失败",
-                message: "用户名或密码不正确，或者该账户不允许远程登录。\n\n原始日志：\n\(log)"
+                message: "用户名或密码不正确，或者该账户不允许远程登录。",
+                showLogs: false
             )
         }
-        return AppAlert(title: "连接 \(displayName) 失败", message: log)
+
+        if lower.contains("connection refused") {
+            return AppAlert(
+                title: "无法连接到 \(displayName)",
+                message: "目标端口 \(port) 没有接受连接。请确认远程桌面已开启、端口正确，并且防火墙已放行。",
+                showLogs: true
+            )
+        }
+
+        if lower.contains("couldn't get socket ip address") || lower.contains("connectlayer")
+            || lower.contains("failed to connect") || lower.contains("errconnect_connect_failed")
+            || lower.contains("timeout") {
+            return AppAlert(
+                title: "连接 \(displayName) 超时",
+                message: "请检查 IP、端口 \(port)、防火墙和网络；广域网还需要端口映射、VPN 或内网穿透。",
+                showLogs: true
+            )
+        }
+
+        if lower.contains("tls") || lower.contains("certificate") {
+            return AppAlert(
+                title: "\(displayName) 的 TLS 握手失败",
+                message: "确认端口 \(port) 是 RDP 端口；也可以尝试把证书策略改为“忽略证书错误”。",
+                showLogs: true
+            )
+        }
+
+        if lower.contains("name lookup") || lower.contains("dns") || lower.contains("not found") {
+            return AppAlert(
+                title: "找不到 \(displayName)",
+                message: "请检查 IP 或主机名是否正确，以及当前网络能否访问它。",
+                showLogs: true
+            )
+        }
+
+        return AppAlert(
+            title: "连接 \(displayName) 失败",
+            message: "请检查网络和远程桌面设置；详细原因可以查看日志。",
+            showLogs: true
+        )
     }
 
     func looksLikeFailure(_ text: String) -> Bool {

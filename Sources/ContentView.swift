@@ -96,11 +96,22 @@ struct ContentView: View {
             }
         }
         .alert(item: $store.lastError) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("好"))
-            )
+            if alert.showLogs {
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    primaryButton: .default(Text("好")),
+                    secondaryButton: .default(Text("查看日志")) {
+                        store.openLogsFolder()
+                    }
+                )
+            } else {
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    dismissButton: .default(Text("好"))
+                )
+            }
         }
         .confirmationDialog(
             "删除电脑？",

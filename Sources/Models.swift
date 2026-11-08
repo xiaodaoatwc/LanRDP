@@ -111,6 +111,7 @@ struct AppAlert: Identifiable {
     let id = UUID()
     var title: String
     var message: String
+    var showLogs: Bool = false
 }
 
 struct PasswordPrompt: Identifiable {
