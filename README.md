@@ -6,6 +6,7 @@
 
 ## 1.6 更新
 
+- 新增 Universal 构建：Apple Silicon（arm64）和 Intel（x86_64）都能运行，版本号仍为 1.6。
 - README 改为“局域网 RDP 的 macOS 小工具”；补充广域网访问说明。
 - 默认证书策略改为“忽略证书错误”，不再首次信任/弹证书提示；首次信任仍保留为高级选项。
 - 更新 GitHub 远程地址：`https://github.com/xiaodaoatwc/LanRDP.git`。
