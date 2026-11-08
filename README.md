@@ -1,0 +1,149 @@
+# LanRDP
+
+一个只做局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
+它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
+
+## 1.4 更新
+
+- App 内打包第三方许可证全文和修改说明；设置页可打开。
+- 生成 FreeRDP 修改补丁，方便复核 Apache-2.0 下的修改。
+- 初始化本地 Git 仓库和本地 bare remote（见“本地 Git”）。
+
+## 1.3 更新
+
+- 修复已保存密码仍被 FreeRDP 多次询问：现在通过 `FREERDP_ASKPASS` 临时助手在每次认证提示时提供同一密码，而不是只喂一次 stdin。
+- 密码仍不出现在进程参数里；askpass 临时文件权限 0600，会话结束即删除。
+- 由于本地签名每次更新都会变化，macOS 钥匙串可能反复要求授权。密码会同时写入一个权限为 0600 的本地 fallback 文件，读取时优先用它，避免每次连接都弹密码框。文件位置：`~/Library/Application Support/LanRDP/passwords-fallback.json`。如果不接受明文 fallback，可以删掉该文件；钥匙串里仍有副本。
+
+## 1.2 更新
+
+- 修复窗口模式启动时“闪一下全屏”：FreeRDP 在 macOS 上用了一个会短暂全屏的虚拟窗口来查询显示器，已改为直接读取显示器信息。
+- 修复全屏模式初始分辨率/任务栏显示异常：现在启动时按真实显示器尺寸建立会话。
+- 增加常用分辨率预设和“使用当前屏幕”。
+- 缩放增加 125%、150%、175%、200%；FreeRDP 原生 140%/180% 仍保留。
+
+## 打开
+
+已构建好的 App：
+
+```text
+lanrdp/build/LanRDP.app
+```
+
+双击打开。因为这是本地 ad-hoc 签名的 App，没有经过 Apple 公证；如果 macOS 第一次拦截，右键点击 App →“打开”，或者在终端执行：
+
+```bash
+xattr -dr com.apple.quarantine lanrdp/build/LanRDP.app
+```
+
+## 使用
+
+1. 点 **添加 PC**。
+   - 填 Windows 的 IP 和端口（默认 3389）
+   - 凭据默认是 **“直接输入”**：填用户名（域可选），连接时输入密码即可，不需要先新建凭据
+   - 需要的话调整显示、Retina 缩放、共享文件夹
+2. 如果多台电脑用同一个账户，可以先去 **凭据** 新建一套共享凭据，再在 PC 里选择它。
+   - 名称：随便起，例如“办公室账户”
+   - 用户名：Windows 用户名
+   - 域：可选，例如 `DESKTOP-ABC`
+   - 密码：保存在 macOS 钥匙串；留空则连接时询问
+3. 点 **连接**。第一次连接会根据证书策略处理证书。
+4. 直接输入的密码可以选择保存在钥匙串，仅该 PC 使用；共享凭据的密码则由多台 PC 共用。
+
+## 功能
+
+- 添加/编辑/删除 PC
+- 自定义分组；删除分组不会删除 PC
+- 直接用户名/密码登录（默认），无需先建凭据
+- 共享凭据，密码保存在 macOS 钥匙串
+- 显示模式：窗口、全屏、固定分辨率
+- 常用分辨率预设（720p、1080p、1440p、4K 等）和“使用当前屏幕”
+- 动态分辨率
+- Retina/高 DPI：100%、125%、150%、175%、200%（另保留 FreeRDP 原生 140%/180%）
+- 多显示器
+- 剪贴板、声音
+- 共享本地文件夹（Windows 中显示为 `\\tsclient\MacShare`）
+- 证书策略：首次信任、忽略、严格校验
+- 额外 FreeRDP 参数
+- 连接日志，失败时自动提示
+
+## 数据位置
+
+```text
+~/Library/Application Support/LanRDP/config.json
+~/Library/Application Support/LanRDP/Logs/
+```
+
+密码不在 `config.json` 里，而是在 macOS 钥匙串，服务名为 `com.lanrdp.credentials`。
+
+## 实现说明
+
+- `sdl-freerdp` 和 OpenSSL 动态库已经打进 App 包，移动到别的 Mac 也能用。
+- 密码通过 `/from-stdin:force` 从标准输入传给 FreeRDP，不出现在进程参数里。
+- Retina 200% 使用 `/scale-desktop:200` + `/scale-device:180`；FreeRDP 的 `/scale` 本身只接受 100/140/180。
+- 连接失败时，程序会读取 FreeRDP 日志并结束卡住的客户端进程，然后把错误显示在 App 里。
+
+## 重新构建
+
+```bash
+cd lanrdp
+./build.sh
+```
+
+`build.sh` 使用 `.build` 中已经编译好的 `sdl-freerdp`。如果要重新编译 FreeRDP，需要：
+
+- CMake
+- OpenSSL 3
+- SDL3 3.4.20（静态库）
+- SDL3_ttf 3.2.2（静态库，FreeType 2.15.0）
+
+当前 `.build` 中已经包含这些依赖和 FreeRDP 源码构建产物。
+
+## 保存的密码不对
+
+- 直接登录：编辑这台 PC，点 **“清除此电脑保存的密码”**，下次连接会重新询问。
+- 共享凭据：编辑左侧“凭据”里的对应项，输入新密码保存。
+
+## 证书变化 / 退出时报错
+
+- 正常关闭远程桌面窗口不会弹“连接失败”。程序只在日志里检测到真正的连接失败、认证失败、3389 拒绝或证书主机密钥变化时才提示。
+- 如果提示“证书已变化 / Host key verification failed”，通常是 Windows 重装、重置远程桌面或换了机器。编辑这台 PC，点 **“清除此电脑的证书缓存”**，然后重新连接；也可以临时把证书策略改成“忽略证书错误”。
+
+## 已知限制
+
+- 这是本地签名 App，不是 Apple 公证版本。
+- 只面向局域网里的 Windows 远程桌面；不支持 Azure Virtual Desktop、Windows 365 等云资源。
+- FreeRDP 的显示缩放取决于 Windows 版本和桌面会话，200% 不保证所有应用都完美。
+- 证书“首次信任”模式会在证书变化时拒绝连接；可在 PC 设置里改为“忽略证书错误”做临时排查。
+
+## 第三方组件与许可证
+
+- FreeRDP 3.33.0 — Apache License 2.0（已修改，见 `MODIFICATIONS.md` / `patches/`）
+- SDL3 3.4.20 / SDL3_ttf 3.2.2 — zlib License
+- OpenSSL 3.3.1 — Apache License 2.0
+- FreeType 2.15.0 — FreeType License（FTL），另附 GPLv2 文本
+
+完整的许可证文本在 `Resources/Licenses/`，规则说明在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+App 内“设置 → 开源许可”也可以直接打开。
+
+## 本地 Git
+
+项目本身是一个 Git 仓库，另外在上一级目录创建了本地 bare remote：
+
+```text
+lanrdp-local.git
+```
+
+查看历史：
+
+```bash
+cd lanrdp
+git log --oneline
+git remote -v
+```
+
+推送到本地 remote：
+
+```bash
+git push origin main
+```

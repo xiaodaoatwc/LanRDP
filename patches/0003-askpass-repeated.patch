@@ -1,0 +1,12 @@
+--- a/client/SDL/SDL3/dialogs/sdl_dialogs.cpp
++++ b/client/SDL/SDL3/dialogs/sdl_dialogs.cpp
+@@ -133,7 +133,8 @@
+ 	p = *password;
+ 
+ 	auto sdl = get_context(instance);
+-	if (!p && !sdl->credentialsRead())
++	/* Always allow askpass/from-stdin to answer repeated authentication prompts. */
++	if (!p)
+ 	{
+ 		std::string line;
+ 		line.reserve(1024);

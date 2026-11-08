@@ -1,0 +1,35 @@
+--- a/client/SDL/SDL3/sdl_window.cpp
++++ b/client/SDL/SDL3/sdl_window.cpp
+@@ -823,8 +823,13 @@
+ 
+ rdpMonitor SdlWindow::query(SDL_DisplayID id, bool forceAsPrimary)
+ {
++#if defined(__APPLE__)
++	/* Avoid flashing a dummy fullscreen window on macOS just to query the display. */
++	return queryDisplay(id, forceAsPrimary);
++#else
+ 	if (sdl::utils::isWaylandDriver() || sdl::utils::isX11Driver())
+ 		return queryDisplay(id, forceAsPrimary);
++#endif
+ 
+ 	std::unique_ptr<SDL_Window, void (*)(SDL_Window*)> window(createDummy(id), SDL_DestroyWindow);
+ 	if (!window)
+@@ -845,6 +850,10 @@
+ 
+ SDL_Rect SdlWindow::rect(SDL_DisplayID id, bool forceAsPrimary)
+ {
++#if defined(__APPLE__)
++	const auto monitor = queryDisplay(id, forceAsPrimary);
++	return { monitor.x, monitor.y, monitor.width, monitor.height };
++#else
+ 	std::unique_ptr<SDL_Window, void (*)(SDL_Window*)> window(createDummy(id), SDL_DestroyWindow);
+ 	if (!window)
+ 		return {};
+@@ -860,6 +869,7 @@
+ 		;
+ 
+ 	return rect(window.get(), forceAsPrimary);
++#endif
+ }
+ 
+ bool SdlWindow::tryFallback(bool isFullscreen)
