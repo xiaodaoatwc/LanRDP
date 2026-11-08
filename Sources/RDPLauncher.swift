@@ -96,6 +96,9 @@ enum RDPLauncher {
         }
 
         args.append("/network:lan")
+        // The SDL connection dialog is a small black progress window; the
+        // manager app reports errors itself using the FreeRDP log.
+        args.append("-sdl-connection-dialog")
         args.append(contentsOf: parseExtraArguments(pc.extraArguments))
         return args
     }

@@ -1,0 +1,68 @@
+--- a/client/SDL/SDL3/sdl_context.cpp
++++ b/client/SDL/SDL3/sdl_context.cpp
+@@ -1,3 +1,4 @@
++/* Modified by LanRDP on 2026-11-09. See MODIFICATIONS.md in the LanRDP distribution. */
+ /**
+  * FreeRDP: A Remote Desktop Protocol Implementation
+  * SDL Client
+@@ -459,6 +460,12 @@
+ 		if (freerdp_settings_get_bool(settings, FreeRDP_RemoteApplicationMode))
+ 			flags |= SDL_WINDOW_HIDDEN;
+ 
++#if defined(__APPLE__)
++		/* LanRDP: avoid showing a small black window while connecting.
++		 * drawToWindows() calls SDL_ShowWindow() on the first painted frame. */
++		flags |= SDL_WINDOW_HIDDEN;
++#endif
++
+ 		auto did = WINPR_ASSERTING_INT_CAST(SDL_DisplayID, id);
+ 		auto window = SdlWindow::create(did, title, flags, w, h);
+ 
+@@ -1820,15 +1827,19 @@
+ 	if (freerdp_settings_get_bool(context()->settings, FreeRDP_RemoteApplicationMode) &&
+ 	    !_rail.desktopMayShow())
+ 		return true;
++
++	/* LanRDP: keep the window hidden until the connection has completed
++	 * and the first real frame damage arrives. */
++	if (!_connected.load())
++		return true;
++	if (rects.empty())
++		return true;
++
+ 	bool firstShow = false;
+ 	for (auto& window : _windows)
+ 	{
+ 		if (SDL_GetWindowFlags(window.second.window()) & SDL_WINDOW_HIDDEN)
+-		{
+-			SDL_ShowWindow(window.second.window());
+-			SDL_RaiseWindow(window.second.window());
+ 			firstShow = true;
+-		}
+ 	}
+ 
+ 	if (rects.empty() && !firstShow)
+@@ -1841,12 +1852,23 @@
+ 			drawRects = { { 0, 0, _primary->w, _primary->h } };
+ 	}
+ 
++	/* LanRDP: draw while the window is still hidden, then show it, so the
++	 * first visible frame is the remote desktop instead of a black canvas. */
+ 	for (auto& window : _windows)
+ 	{
+ 		if (!drawToWindow(window.second, drawRects))
+ 			return false;
+ 	}
+ 
++	for (auto& window : _windows)
++	{
++		if (SDL_GetWindowFlags(window.second.window()) & SDL_WINDOW_HIDDEN)
++		{
++			SDL_ShowWindow(window.second.window());
++			SDL_RaiseWindow(window.second.window());
++		}
++	}
++
+ 	return true;
+ }
+ 

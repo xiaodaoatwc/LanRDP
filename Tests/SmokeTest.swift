@@ -36,6 +36,7 @@ struct SmokeTest {
         expect(args.contains("/scale-desktop:200"), "retina scaling")
         expect(args.contains("/drive:MacShare,/Users/linc/Downloads"), "folder sharing")
         expect(args.contains("-sound"), "audio disabled")
+        expect(args.contains("-sdl-connection-dialog"), "SDL connection dialog disabled")
         expect(!args.contains(where: { $0.hasPrefix("/p:") }), "password not in argv")
 
         let parsed = RDPLauncher.parseExtraArguments("/sec:nla \"/gfx:AVC444\"")

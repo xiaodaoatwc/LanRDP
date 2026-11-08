@@ -25,12 +25,21 @@ LanRDP 分发的 `sdl-freerdp` 基于 FreeRDP 3.33.0，包含以下本地修改�
 - **原因**：NLA 和后续登录阶段可能多次请求凭据。原逻辑只允许第一次从
   askpass/stdin 读取，后续会弹 SDL 密码框，导致用户重复输入。
 
+## 4. `client/SDL/SDL3/sdl_context.cpp`
+
+- **修改**：macOS 上创建主 RDP 窗口时默认隐藏；等待连接完成、并且收到第一帧实际画面后，
+  先在隐藏状态下绘制，再调用 `SDL_ShowWindow`。
+- **原因**：原来窗口先显示、后绘制，会先出现一个小黑窗/黑屏首帧。
+- **配套**：LanRDP 启动参数增加 `-sdl-connection-dialog`，关闭 FreeRDP 自带的连接进度小窗；
+  错误改由 LanRDP 自己弹出。
+
 补丁文件位于 `patches/`，可在 FreeRDP 源码根目录执行：
 
 ```bash
 patch -p1 < patches/0001-sdl-utils-sdl3420.patch
 patch -p1 < patches/0002-macos-display-query.patch
 patch -p1 < patches/0003-askpass-repeated.patch
+patch -p1 < patches/0004-sdl-context-hidden-window.patch
 ```
 
 修改日期：2026-11-08。
