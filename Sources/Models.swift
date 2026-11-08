@@ -88,6 +88,7 @@ struct PC: Identifiable, Codable, Hashable {
     var clipboard: Bool = true
     var audio: Bool = true
     var multiMonitor: Bool = false
+    var adminSession: Bool? = false
     var shareFolder: Bool = false
     var folderPath: String = ""
     var certificatePolicy: CertificatePolicy = .ignore

@@ -91,6 +91,12 @@ enum RDPLauncher {
             args.append("/multimon")
         }
 
+        if pc.adminSession == true {
+            // RDS servers without an available CAL accept an administrator
+            // session, equivalent to mstsc /admin.
+            args.append("/admin")
+        }
+
         if pc.shareFolder, !pc.folderPath.isEmpty {
             args.append("/drive:MacShare,\(pc.folderPath)")
         }

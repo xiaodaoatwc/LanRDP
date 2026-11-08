@@ -52,6 +52,11 @@ struct SmokeTest {
         expect(args150.contains("/scale-desktop:150"), "150% desktop scaling")
         expect(args150.contains("/scale-device:140"), "150% nearest device scaling")
 
+        var adminPC = pc
+        adminPC.adminSession = true
+        let adminArgs = RDPLauncher.buildArguments(pc: adminPC, username: "administrator", domain: "")
+        expect(adminArgs.contains("/admin"), "admin session argument")
+
         let temp = FileManager.default.temporaryDirectory
             .appendingPathComponent("LanRDP-Smoke-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)

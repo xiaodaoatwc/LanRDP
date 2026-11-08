@@ -151,6 +151,10 @@ struct PCEditorView: View {
 
                     Toggle("动态分辨率", isOn: $draft.dynamicResolution)
                     Toggle("多显示器", isOn: $draft.multiMonitor)
+                    Toggle("管理员会话（/admin）", isOn: adminBinding)
+                    Text("RDS 服务器没有可用 CAL 时，用管理员会话连接，相当于 mstsc /admin；需要该账户有管理员权限。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     Text("FreeRDP 旧的 /scale 只接受 100/140/180；125/150/175/200 通过 /scale-desktop 发送。200% 适合 Retina，但 Windows 里可能有应用不跟随缩放。")
                         .font(.caption)
@@ -274,6 +278,13 @@ struct PCEditorView: View {
         guard let screen = NSScreen.main else { return }
         draft.width = Int(screen.frame.width)
         draft.height = Int(screen.frame.height)
+    }
+
+    private var adminBinding: Binding<Bool> {
+        Binding(
+            get: { draft.adminSession ?? false },
+            set: { draft.adminSession = $0 }
+        )
     }
 
     private var usernameBinding: Binding<String> {
