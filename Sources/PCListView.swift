@@ -106,7 +106,7 @@ struct PCListContent: View {
         ContentUnavailableView {
             Label("还没有电脑", systemImage: "desktopcomputer")
         } description: {
-            Text("添加一台局域网里的 Windows 电脑，用 FreeRDP 连接。\n不需要 Microsoft 账号，也不做联网检查。")
+            Text("添加一台 Windows 电脑，用 FreeRDP 连接。\n局域网或广域网都可以，不需要 Microsoft 账号。")
         } actions: {
             Button("添加第一台 PC", action: onAdd)
                 .buttonStyle(.borderedProminent)

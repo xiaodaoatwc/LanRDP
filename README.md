@@ -1,7 +1,14 @@
 # LanRDP
 
-一个只做局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
+一个局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
+只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
+
+## 1.6 更新
+
+- README 改为“局域网 RDP 的 macOS 小工具”；补充广域网访问说明。
+- 默认证书策略改为“忽略证书错误”，不再首次信任/弹证书提示；首次信任仍保留为高级选项。
+- 更新 GitHub 远程地址：`https://github.com/xiaodaoatwc/LanRDP.git`。
 
 ## 1.5 更新
 
@@ -68,7 +75,7 @@ xattr -dr com.apple.quarantine lanrdp/build/LanRDP.app
 - 多显示器
 - 剪贴板、声音
 - 共享本地文件夹（Windows 中显示为 `\\tsclient\MacShare`）
-- 证书策略：首次信任、忽略、严格校验
+- 证书策略：忽略证书错误（默认，无提示）、首次信任、严格校验
 - 额外 FreeRDP 参数
 - 连接日志，失败时自动提示
 
@@ -117,9 +124,9 @@ cd lanrdp
 ## 已知限制
 
 - 这是本地签名 App，不是 Apple 公证版本。
-- 只面向局域网里的 Windows 远程桌面；不支持 Azure Virtual Desktop、Windows 365 等云资源。
+- 面向 Windows 远程桌面，可用于局域网或广域网；不支持 Azure Virtual Desktop、Windows 365 等云资源。
 - FreeRDP 的显示缩放取决于 Windows 版本和桌面会话，200% 不保证所有应用都完美。
-- 证书“首次信任”模式会在证书变化时拒绝连接；可在 PC 设置里改为“忽略证书错误”做临时排查。
+- 默认“忽略证书错误”不会弹出证书信任提示；如果启用“首次信任”，证书变化时可能拒绝连接，可在 PC 设置里改回忽略或清除证书缓存。
 
 ## 第三方组件与许可证
 

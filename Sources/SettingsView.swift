@@ -99,9 +99,9 @@ struct SettingsView: View {
                             .font(.system(size: 28))
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("LanRDP 1.5")
+                            Text("LanRDP 1.6")
                                 .font(.headline)
-                            Text("一个只做局域网 RDP 的小工具。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。")
+                            Text("一个 RDP 的 macOS 小工具，可用于局域网或广域网。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("LanRDP 原始代码：MIT License，Copyright (c) 2026 xiaodaoatwc。")

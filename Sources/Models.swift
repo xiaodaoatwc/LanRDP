@@ -44,26 +44,26 @@ enum DisplayMode: String, Codable, CaseIterable, Identifiable {
 }
 
 enum CertificatePolicy: String, Codable, CaseIterable, Identifiable {
-    case tofu
     case ignore
+    case tofu
     case deny
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .tofu: return "首次信任（推荐）"
-        case .ignore: return "忽略证书错误"
+        case .ignore: return "忽略证书错误（默认，无提示）"
+        case .tofu: return "首次信任（高级）"
         case .deny: return "严格校验"
         }
     }
 
     var detail: String {
         switch self {
+        case .ignore:
+            return "不校验证书，不会弹出首次信任提示。局域网和广域网都能直接连接，但无法防御中间人攻击；广域网建议配合 VPN 或可信证书使用。"
         case .tofu:
             return "第一次连接时接受该电脑的证书，之后证书变化会拒绝连接。"
-        case .ignore:
-            return "不校验证书，方便但安全性较低，仅建议在可信局域网中使用。"
         case .deny:
             return "证书不匹配时直接拒绝连接。"
         }
@@ -90,14 +90,14 @@ struct PC: Identifiable, Codable, Hashable {
     var multiMonitor: Bool = false
     var shareFolder: Bool = false
     var folderPath: String = ""
-    var certificatePolicy: CertificatePolicy = .tofu
+    var certificatePolicy: CertificatePolicy = .ignore
     var extraArguments: String = ""
     var lastConnected: Date?
 }
 
 struct AppSettings: Codable, Hashable {
     var binaryPath: String = ""
-    var defaultCertificatePolicy: CertificatePolicy = .tofu
+    var defaultCertificatePolicy: CertificatePolicy = .ignore
 }
 
 struct AppConfig: Codable {

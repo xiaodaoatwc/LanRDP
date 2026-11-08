@@ -145,7 +145,7 @@ struct ContentView: View {
         case .all:
             PCListContent(
                 title: "所有电脑",
-                subtitle: "局域网里的远程桌面",
+                subtitle: "局域网 / 广域网远程桌面",
                 pcs: store.pcs,
                 onAdd: { showAddPC = true },
                 onConnect: { store.connect($0) },
