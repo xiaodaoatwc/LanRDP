@@ -3,6 +3,11 @@
 一个只做局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 
+## 1.5 更新
+
+- 增加 MIT `LICENSE`，版权人：`xiaodaoatwc`。
+- App 和 DMG 内也包含 `LICENSE`。
+
 ## 1.4 更新
 
 - App 内打包第三方许可证全文和修改说明；设置页可打开。
@@ -147,3 +152,13 @@ git remote -v
 ```bash
 git push origin main
 ```
+
+## License
+
+LanRDP 原始代码使用 MIT License，版权人：
+
+```text
+Copyright (c) 2026 xiaodaoatwc
+```
+
+完整文本见 [LICENSE](LICENSE)。FreeRDP、OpenSSL、SDL3、SDL3_ttf、FreeType 等第三方组件仍按各自许可证分发，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

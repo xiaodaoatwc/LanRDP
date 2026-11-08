@@ -55,8 +55,9 @@ LanRDP 与这些项目没有隶属或背书关系。
 
 ## LanRDP 原始代码
 
-LanRDP 自己的 SwiftUI、配置管理和启动逻辑目前没有声明开源许可证；在对外分发前，
-项目所有者应补充一个 `LICENSE`（例如 MIT 或 Apache-2.0）。本文件只覆盖第三方组件。
+LanRDP 自己的 SwiftUI、配置管理和启动逻辑使用 MIT License，
+版权人：`Copyright (c) 2026 xiaodaoatwc`，全文见 `LICENSE`。
+本文件主要覆盖第三方组件。
 
 ## 源码与修改
 

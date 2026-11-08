@@ -30,7 +30,7 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 mkdir -p "$APP/Contents/Resources/Licenses"
 cp "$ROOT/Resources/Licenses/"* "$APP/Contents/Resources/Licenses/"
-cp "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/MODIFICATIONS.md" "$APP/Contents/Resources/"
+cp "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/MODIFICATIONS.md" "$ROOT/LICENSE" "$APP/Contents/Resources/"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 echo "==> Bundling sdl-freerdp and OpenSSL"
