@@ -33,6 +33,12 @@ LanRDP 分发的 `sdl-freerdp` 基于 FreeRDP 3.33.0，包含以下本地修改�
 - **配套**：LanRDP 启动参数增加 `-sdl-connection-dialog`，关闭 FreeRDP 自带的连接进度小窗；
   错误改由 LanRDP 自己弹出。
 
+## 5. `client/SDL/SDL3/sdl_window.cpp`（全屏恢复窗口）
+
+- **修改**：macOS 上从全屏切回窗口时，用 `SDL_GetDisplayUsableBounds` 取可见桌面，
+  扣除窗口边框后设置窗口大小和位置。
+- **原因**：原来的恢复尺寸可能覆盖 Dock（Dock 在左/右/下都会发生）。
+
 补丁文件位于 `patches/`，可在 FreeRDP 源码根目录执行：
 
 ```bash
@@ -40,6 +46,7 @@ patch -p1 < patches/0001-sdl-utils-sdl3420.patch
 patch -p1 < patches/0002-macos-display-query.patch
 patch -p1 < patches/0003-askpass-repeated.patch
 patch -p1 < patches/0004-sdl-context-hidden-window.patch
+patch -p1 < patches/0005-sdl-window-usable-bounds.patch
 ```
 
 修改日期：2026-11-08。

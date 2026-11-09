@@ -34,6 +34,10 @@ struct SmokeTest {
         expect(args.contains("/cert:ignore"), "certificate policy")
         expect(args.contains("/w:1600") && args.contains("/h:1000"), "window size")
         expect(args.contains("/scale-desktop:200"), "retina scaling")
+        var pc100 = pc
+        pc100.scaling = 100
+        let args100 = RDPLauncher.buildArguments(pc: pc100, username: "linc", domain: "")
+        expect(args100.contains("/scale:100"), "explicit 100% DPI")
         expect(args.contains("/drive:MacShare,/Users/linc/Downloads"), "folder sharing")
         expect(args.contains("-sound"), "audio disabled")
         expect(args.contains("-sdl-connection-dialog"), "SDL connection dialog disabled")

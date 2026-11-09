@@ -68,7 +68,9 @@ enum RDPLauncher {
 
         switch pc.scaling {
         case 100:
-            break
+            // Explicitly force 100% DPI; otherwise an RDS/Windows host may
+            // keep its own 150%/200% scaling and show oversized icons.
+            args.append("/scale:100")
         case 140, 180:
             // FreeRDP's /scale shortcut only accepts these two values.
             args.append("/scale:\(pc.scaling)")

@@ -128,7 +128,7 @@ struct PCEditorView: View {
                                     }
                                 }
                                 Divider()
-                                Button("使用当前屏幕") {
+                                Button("使用可见桌面（不含 Dock）") {
                                     useCurrentScreenSize()
                                 }
                             }
@@ -276,8 +276,10 @@ struct PCEditorView: View {
 
     private func useCurrentScreenSize() {
         guard let screen = NSScreen.main else { return }
-        draft.width = Int(screen.frame.width)
-        draft.height = Int(screen.frame.height)
+        // visibleFrame excludes the menu bar and the Dock, regardless of
+        // whether the Dock is on the left, right or bottom.
+        draft.width = Int(screen.visibleFrame.width)
+        draft.height = Int(screen.visibleFrame.height)
     }
 
     private var adminBinding: Binding<Bool> {
