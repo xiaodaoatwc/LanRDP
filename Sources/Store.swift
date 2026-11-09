@@ -48,6 +48,31 @@ final class Store: ObservableObject {
         try? fileManager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
         load()
+        migrateKeychainLabels()
+    }
+
+    private func migrateKeychainLabels() {
+        let defaultsKey = "LanRDPKeychainLabelsMigratedV1"
+        guard !UserDefaults.standard.bool(forKey: defaultsKey) else { return }
+
+        for credential in credentials {
+            Keychain.setLabel(
+                "LanRDP: \(credential.name)",
+                description: "LanRDP shared credential",
+                for: credential.id,
+                service: Keychain.credentialService
+            )
+        }
+        for pc in pcs {
+            let name = pc.name.isEmpty ? pc.host : pc.name
+            Keychain.setLabel(
+                "LanRDP: \(name)",
+                description: "LanRDP PC password",
+                for: pc.id,
+                service: Keychain.pcService
+            )
+        }
+        UserDefaults.standard.set(true, forKey: defaultsKey)
     }
 
     // MARK: - Persistence
@@ -249,7 +274,12 @@ final class Store: ObservableObject {
         passwordCache[credential.id] = password
         passwordVault.setPassword(password, for: credential.id)
         do {
-            try Keychain.setPassword(password, for: credential.id)
+            try Keychain.setPassword(
+                password,
+                for: credential.id,
+                label: "LanRDP: \(credential.name)",
+                description: "LanRDP shared credential"
+            )
         } catch {
             // The 0600 fallback is still available; don't block the user.
             NSLog("LanRDP keychain write failed: %@", error.localizedDescription)
@@ -259,8 +289,15 @@ final class Store: ObservableObject {
     func setPassword(_ password: String, for pc: PC) {
         passwordCache[pc.id] = password
         passwordVault.setPassword(password, for: pc.id)
+        let name = pc.name.isEmpty ? pc.host : pc.name
         do {
-            try Keychain.setPassword(password, for: pc.id, service: Keychain.pcService)
+            try Keychain.setPassword(
+                password,
+                for: pc.id,
+                service: Keychain.pcService,
+                label: "LanRDP: \(name)",
+                description: "LanRDP PC password"
+            )
         } catch {
             NSLog("LanRDP keychain write failed: %@", error.localizedDescription)
         }

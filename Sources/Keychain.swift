@@ -25,21 +25,52 @@ enum Keychain {
         ]
     }
 
-    static func setPassword(_ password: String, for id: UUID, service: String = credentialService) throws {
+    static func setPassword(
+        _ password: String,
+        for id: UUID,
+        service: String = credentialService,
+        label: String? = nil,
+        description: String? = nil
+    ) throws {
         let data = Data(password.utf8)
         let base = query(for: id, service: service)
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        var attributes: [String: Any] = [kSecValueData as String: data]
+        if let label {
+            attributes[kSecAttrLabel as String] = label
+        }
+        if let description {
+            attributes[kSecAttrDescription as String] = description
+        }
         let updateStatus = SecItemUpdate(base as CFDictionary, attributes as CFDictionary)
 
         if updateStatus == errSecItemNotFound {
             var add = base
             add[kSecValueData as String] = data
             add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            if let label {
+                add[kSecAttrLabel as String] = label
+            }
+            if let description {
+                add[kSecAttrDescription as String] = description
+            }
             let addStatus = SecItemAdd(add as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw KeychainError.status(addStatus) }
         } else if updateStatus != errSecSuccess {
             throw KeychainError.status(updateStatus)
         }
+    }
+
+    static func setLabel(
+        _ label: String,
+        description: String? = nil,
+        for id: UUID,
+        service: String = credentialService
+    ) {
+        var attributes: [String: Any] = [kSecAttrLabel as String: label]
+        if let description {
+            attributes[kSecAttrDescription as String] = description
+        }
+        SecItemUpdate(query(for: id, service: service) as CFDictionary, attributes as CFDictionary)
     }
 
     static func password(for id: UUID, service: String = credentialService) -> String? {

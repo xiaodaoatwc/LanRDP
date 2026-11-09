@@ -75,10 +75,11 @@ struct SettingsView: View {
 
                 Section("维护") {
                     HStack {
+                        Button("打开钥匙串访问") { openKeychainAccess() }
                         Button("打开配置文件夹") { store.openConfigFolder() }
                         Button("打开日志文件夹") { store.openLogsFolder() }
                     }
-                    Text("配置和日志位于 ~/Library/Application Support/LanRDP。")
+                    Text("钥匙串条目搜索 LanRDP 或 com.lanrdp.credentials；配置和日志位于 ~/Library/Application Support/LanRDP。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -99,7 +100,7 @@ struct SettingsView: View {
                             .font(.system(size: 28))
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("LanRDP 1.11")
+                            Text("LanRDP 1.12 beta 1")
                                 .font(.headline)
                             Text("一个 RDP 的 macOS 小工具，可用于局域网或广域网。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。")
                                 .font(.caption)
@@ -117,6 +118,10 @@ struct SettingsView: View {
             .formStyle(.grouped)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func openKeychainAccess() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Keychain Access.app"))
     }
 
     private func openNotices() {
