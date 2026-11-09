@@ -1,42 +1,50 @@
 --- a/client/SDL/SDL3/sdl_window.cpp
 +++ b/client/SDL/SDL3/sdl_window.cpp
-@@ -236,6 +236,39 @@
+@@ -236,8 +236,47 @@
  	}
  	std::ignore = SDL_SetWindowFullscreen(_window, enter);
  	std::ignore = SDL_SyncWindow(_window);
 +
-+#if defined(__APPLE__)
 +	if (!enter)
-+	{
-+		/* LanRDP: when returning from fullscreen, fit the window into the
-+		 * display's usable area so it never covers the Dock or menu bar. */
-+		const auto display = SDL_GetDisplayForWindow(_window);
-+		SDL_Rect usable = {};
-+		if (SDL_GetDisplayUsableBounds(display, &usable))
-+		{
-+			int top = 0;
-+			int left = 0;
-+			int bottom = 0;
-+			int right = 0;
-+			if (!SDL_GetWindowBordersSize(_window, &top, &left, &bottom, &right))
-+			{
-+				top = 0;
-+				left = 0;
-+				bottom = 0;
-+				right = 0;
-+			}
-+
-+			const int w = usable.w - left - right;
-+			const int h = usable.h - top - bottom;
-+			if ((w > 0) && (h > 0))
-+			{
-+				std::ignore = SDL_SetWindowSize(_window, w, h);
-+				std::ignore = SDL_SetWindowPosition(_window, usable.x + left, usable.y + top);
-+				std::ignore = SDL_SyncWindow(_window);
-+			}
-+		}
-+	}
-+#endif
++		fitToUsableBounds();
  }
  
++void SdlWindow::fitToUsableBounds()
++{
++#if defined(__APPLE__)
++	if (!_window)
++		return;
++
++	/* LanRDP: fit a windowed session into the display's usable area so it
++	 * never covers the Dock or menu bar. */
++	const auto display = SDL_GetDisplayForWindow(_window);
++	SDL_Rect usable = {};
++	if (!SDL_GetDisplayUsableBounds(display, &usable))
++		return;
++
++	int top = 0;
++	int left = 0;
++	int bottom = 0;
++	int right = 0;
++	if (!SDL_GetWindowBordersSize(_window, &top, &left, &bottom, &right))
++	{
++		top = 0;
++		left = 0;
++		bottom = 0;
++		right = 0;
++	}
++
++	const int w = usable.w - left - right;
++	const int h = usable.h - top - bottom;
++	if ((w <= 0) || (h <= 0))
++		return;
++
++	std::ignore = SDL_SetWindowSize(_window, w, h);
++	std::ignore = SDL_SetWindowPosition(_window, usable.x + left, usable.y + top);
++	std::ignore = SDL_SyncWindow(_window);
++#endif
++}
++
  void SdlWindow::minimize()
+ {
+ 	SDL_MinimizeWindow(_window);

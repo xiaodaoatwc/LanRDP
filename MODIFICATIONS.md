@@ -39,6 +39,13 @@ LanRDP 分发的 `sdl-freerdp` 基于 FreeRDP 3.33.0，包含以下本地修改�
   扣除窗口边框后设置窗口大小和位置。
 - **原因**：原来的恢复尺寸可能覆盖 Dock（Dock 在左/右/下都会发生）。
 
+## 6. `client/SDL/SDL3/sdl_disp.cpp`
+
+- **修改**：收到 `SDL_EVENT_WINDOW_LEAVE_FULLSCREEN`（包括 macOS 原生全屏退出）时，
+  调用 `SdlWindow::fitToUsableBounds()`。
+- **原因**：只改 `fullscreen(false)` 覆盖不到 macOS 绿色按钮/原生全屏退出路径，
+  这条事件路径同样需要把窗口限制在可见桌面内。
+
 补丁文件位于 `patches/`，可在 FreeRDP 源码根目录执行：
 
 ```bash
@@ -47,6 +54,7 @@ patch -p1 < patches/0002-macos-display-query.patch
 patch -p1 < patches/0003-askpass-repeated.patch
 patch -p1 < patches/0004-sdl-context-hidden-window.patch
 patch -p1 < patches/0005-sdl-window-usable-bounds.patch
+patch -p1 < patches/0006-sdl-disp-native-fullscreen-exit.patch
 ```
 
 修改日期：2026-11-08。
