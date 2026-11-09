@@ -7,8 +7,8 @@ enum KeychainError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .status(let status):
-            let message = SecCopyErrorMessageString(status, nil) as String? ?? "未知错误"
-            return "钥匙串错误 \(status)：\(message)"
+            let message = SecCopyErrorMessageString(status, nil) as String? ?? L10n.t("未知错误")
+            return L10n.f("钥匙串错误 %d：%@", Int(status), message)
         }
     }
 }

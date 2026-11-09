@@ -33,7 +33,7 @@ struct CredentialEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(isNew ? "新建凭据" : "编辑凭据")
+                Text(LocalizedStringKey(isNew ? "新建凭据" : "编辑凭据"))
                     .font(.title2.weight(.semibold))
                 Spacer()
             }
@@ -47,7 +47,7 @@ struct CredentialEditorView: View {
                     TextField("名称", text: $draft.name, prompt: Text("例如：办公室账户"))
                     TextField("用户名", text: $draft.username, prompt: Text("linc"))
                     TextField("域（可选）", text: $draft.domain, prompt: Text("DESKTOP-ABC"))
-                    SecureField("密码", text: $password, prompt: Text(isNew ? "可留空，连接时询问" : "留空则保留原密码"))
+                    SecureField("密码", text: $password, prompt: Text(LocalizedStringKey(isNew ? "可留空，连接时询问" : "留空则保留原密码")))
                 }
 
                 Section {
@@ -71,7 +71,7 @@ struct CredentialEditorView: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                Button(isNew ? "添加" : "保存") {
+                Button(LocalizedStringKey(isNew ? "添加" : "保存")) {
                     save()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -90,11 +90,11 @@ struct CredentialEditorView: View {
         candidate.domain = candidate.domain.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !candidate.name.isEmpty else {
-            errorMessage = "请给这套凭据起一个名字。"
+            errorMessage = L10n.t("请给这套凭据起一个名字。")
             return
         }
         guard !candidate.username.isEmpty else {
-            errorMessage = "请填写 Windows 用户名。"
+            errorMessage = L10n.t("请填写 Windows 用户名。")
             return
         }
 

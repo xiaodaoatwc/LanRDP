@@ -1,0 +1,217 @@
+/*
+ * LanRDP English localization.
+ * Chinese strings are the development-language keys.
+ */
+
+/* General */
+"设置" = "Settings";
+"取消" = "Cancel";
+"保存" = "Save";
+"添加" = "Add";
+"删除" = "Delete";
+"连接" = "Connect";
+"连接中" = "Connecting";
+"更多" = "More";
+"选择…" = "Choose…";
+"选择" = "Choose";
+"好" = "OK";
+"查看日志" = "View log";
+"直接" = "Direct";
+"直接输入" = "Direct login";
+"直接输入（默认）" = "Direct login (default)";
+"直接：%@" = "Direct: %@";
+"未分组" = "Ungrouped";
+"未分组 · 无凭据" = "Ungrouped · No credential";
+"分组" = "Group";
+"分组不存在" = "Group not found";
+"分组名称" = "Group name";
+"分组名称不能为空。" = "Group name cannot be empty.";
+"新建分组" = "New group";
+"重命名…" = "Rename…";
+"删除分组" = "Delete group";
+"删除分组？" = "Delete group?";
+"删除电脑？" = "Delete PC?";
+"删除凭据？" = "Delete credential?";
+"管理" = "Manage";
+"电脑" = "Computers";
+"所有电脑" = "All PCs";
+"局域网 / 广域网远程桌面" = "LAN / WAN remote desktop";
+"选择左侧的项目" = "Select an item on the left";
+"查看所有电脑、分组、凭据或设置。" = "View all PCs, groups, credentials, or settings.";
+
+/* Language */
+"语言" = "Language";
+"跟随系统" = "Follow System";
+"简体中文" = "简体中文";
+
+/* PC list */
+"搜索电脑" = "Search PCs";
+"没有匹配的电脑" = "No matching PCs";
+"换个名称、IP 或凭据试试。" = "Try a different name, IP, or credential.";
+"添加 PC" = "Add PC";
+"添加一台远程电脑" = "Add a remote PC";
+"添加分组" = "Add group";
+"管理共享凭据" = "Manage shared credentials";
+"还没有电脑" = "No PCs yet";
+"添加一台 Windows 电脑，用 FreeRDP 连接。\n局域网或广域网都可以，不需要 Microsoft 账号。" = "Add a Windows PC and connect with FreeRDP.\nWorks on LAN or WAN; no Microsoft account required.";
+"添加第一台 PC" = "Add your first PC";
+"编辑…" = "Edit…";
+"共享本地文件夹" = "Shared local folder";
+"全屏 · %ld%%" = "Full screen · %ld%%";
+"%ld×%ld · 动态 · %ld%%" = "%ld×%ld · Dynamic · %ld%%";
+"%ld×%ld · 固定 · %ld%%" = "%ld×%ld · Fixed · %ld%%";
+"%ld 台电脑 · %@" = "%ld PCs · %@";
+"%ld 台电脑" = "%ld PCs";
+
+/* Sidebar */
+"凭据" = "Credentials";
+
+/* Credentials */
+"还没有凭据" = "No credentials yet";
+"一套凭据可以被多台电脑共用。密码保存在 macOS 钥匙串中。" = "One credential can be shared by multiple PCs. Passwords are stored in the macOS Keychain.";
+"新建凭据" = "New credential";
+"%ld 套凭据 · 可被多台电脑共用" = "%ld credentials · shared by multiple PCs";
+"未使用" = "Unused";
+"“%@”会从钥匙串删除；使用它的电脑会变成“未选择凭据”，需要重新指定。" = "“%@” will be deleted from the Keychain. PCs using it will be set to “No credential” and must be reassigned.";
+"登录信息" = "Login";
+"名称" = "Name";
+"例如：办公室账户" = "e.g. Office account";
+"用户名" = "Username";
+"域（可选）" = "Domain (optional)";
+"密码" = "Password";
+"可留空，连接时询问" = "Optional; ask on connect";
+"留空则保留原密码" = "Leave blank to keep the current password";
+"用户名和域会随凭据共用；密码保存在 macOS 钥匙串。" = "Username and domain are shared with this credential; the password is stored in the macOS Keychain.";
+"请给这套凭据起一个名字。" = "Please name this credential.";
+"请填写 Windows 用户名。" = "Please enter the Windows username.";
+"新建共享凭据…" = "New shared credential…";
+
+/* PC editor */
+"编辑 PC" = "Edit PC";
+"常规" = "General";
+"例如：办公室电脑" = "e.g. Office PC";
+"主机名或 IP" = "Hostname or IP";
+"端口" = "Port";
+"Windows 用户名" = "Windows username";
+"例如 DESKTOP-ABC" = "e.g. DESKTOP-ABC";
+"不选共享凭据时，连接会询问密码；也可以把密码保存到钥匙串，仅此电脑使用。" = "When no shared credential is selected, the password is requested on connect. You can also save it in the Keychain for this PC only.";
+"清除此电脑保存的密码" = "Clear saved password for this PC";
+"已清除" = "Cleared";
+"这套凭据的密码由多台电脑共用；在左侧“凭据”中修改。" = "This credential’s password is shared by multiple PCs; edit it under “Credentials”.";
+"共享凭据适合多台电脑使用同一账户；直接输入适合临时或独立账户。" = "Shared credentials are for multiple PCs using the same account; direct login is for temporary or individual accounts.";
+"显示" = "Display";
+"模式" = "Mode";
+"宽度" = "Width";
+"高度" = "Height";
+"常用分辨率" = "Common resolutions";
+"使用可见桌面（不含 Dock）" = "Use visible desktop (excluding Dock)";
+"当前：%ld×%ld" = "Current: %ld×%ld";
+"缩放" = "Scaling";
+"动态分辨率" = "Dynamic resolution";
+"多显示器" = "Multiple monitors";
+"管理员会话（/admin）" = "Admin session (/admin)";
+"RDS 服务器没有可用 CAL 时，用管理员会话连接，相当于 mstsc /admin；需要该账户有管理员权限。" = "When an RDS server has no available CAL, connect with an admin session (equivalent to mstsc /admin). The account must be an administrator.";
+"FreeRDP 旧的 /scale 只接受 100/140/180；125/150/175/200 通过 /scale-desktop 发送。200% 适合 Retina，但 Windows 里可能有应用不跟随缩放。" = "FreeRDP’s legacy /scale accepts only 100/140/180; 125/150/175/200 are sent via /scale-desktop. 200% suits Retina, but some Windows apps may not follow it.";
+"设备与共享" = "Devices & sharing";
+"剪贴板" = "Clipboard";
+"声音" = "Sound";
+"文件夹" = "Folder";
+"在 Windows 中会显示为 \\\\tsclient\\MacShare。" = "Appears as \\\\tsclient\\MacShare in Windows.";
+"安全" = "Security";
+"证书" = "Certificate";
+"清除此电脑的证书缓存" = "Clear certificate cache for this PC";
+"如果 Windows 重装过、证书变化导致“Host key verification failed”，清除缓存后重新连接。" = "If Windows was reinstalled and the certificate changed (“Host key verification failed”), clear the cache and reconnect.";
+"高级" = "Advanced";
+"额外参数" = "Extra arguments";
+"例如：/sec:nla /gfx:AVC444。参数会直接传给 sdl-freerdp。" = "e.g. /sec:nla /gfx:AVC444. Arguments are passed directly to sdl-freerdp.";
+"清除失败" = "Failed to clear";
+"没有缓存" = "No cache";
+"请填写 Windows 电脑的 IP 或主机名。" = "Enter the Windows PC’s IP or hostname.";
+"端口需要在 1–65535 之间。" = "Port must be between 1 and 65535.";
+"窗口分辨率至少为 640×480。" = "Resolution must be at least 640×480.";
+"开启文件夹共享后需要选择一个本地文件夹。" = "Choose a local folder when folder sharing is enabled.";
+
+/* Display / certificate */
+"窗口（可调整）" = "Window (resizable)";
+"全屏" = "Full screen";
+"固定分辨率" = "Fixed resolution";
+"窗口" = "Window";
+"固定" = "Fixed";
+"忽略证书错误（默认，无提示）" = "Ignore certificate errors (default, no prompt)";
+"首次信任（高级）" = "Trust on first use (advanced)";
+"严格校验" = "Strict verification";
+"不校验证书，不会弹出首次信任提示。局域网和广域网都能直接连接，但无法防御中间人攻击；广域网建议配合 VPN 或可信证书使用。" = "Do not verify certificates; no trust prompt. Works on LAN and WAN, but cannot prevent MITM attacks. Use a VPN or trusted certificate on WAN.";
+"第一次连接时接受该电脑的证书，之后证书变化会拒绝连接。" = "Accept the PC’s certificate on first connect; reject it if it changes later.";
+"证书不匹配时直接拒绝连接。" = "Reject the connection if the certificate does not match.";
+
+/* Settings */
+"FreeRDP、证书和配置文件" = "FreeRDP, certificates, and configuration";
+"sdl-freerdp 路径" = "sdl-freerdp path";
+"留空则自动检测" = "Leave empty to auto-detect";
+"当前使用：%@" = "Currently using: %@";
+"自动检测" = "Auto-detect";
+"检查版本" = "Check version";
+"App 内已打包一份 sdl-freerdp。也可以指定 Homebrew 安装的版本（/opt/homebrew/bin/sdl-freerdp）。" = "A copy of sdl-freerdp is bundled with the app. You can also point to a Homebrew install (/opt/homebrew/bin/sdl-freerdp).";
+"默认设置" = "Defaults";
+"新电脑的证书策略" = "Certificate policy for new PCs";
+"维护" = "Maintenance";
+"打开钥匙串访问" = "Open Keychain Access";
+"打开配置文件夹" = "Open config folder";
+"打开日志文件夹" = "Open logs folder";
+"钥匙串条目搜索 LanRDP 或 com.lanrdp.credentials；配置和日志位于 ~/Library/Application Support/LanRDP。" = "Search Keychain for “LanRDP” or “com.lanrdp.credentials”. Config and logs are in ~/Library/Application Support/LanRDP.";
+"开源许可" = "Open source licenses";
+"查看第三方许可" = "View third-party licenses";
+"打开许可证文件夹" = "Open licenses folder";
+"FreeRDP 3.33.0（Apache-2.0，已修改）、SDL3/SDL3_ttf（zlib）、FreeType（FTL）、OpenSSL（Apache-2.0）。" = "FreeRDP 3.33.0 (Apache-2.0, modified), SDL3/SDL3_ttf (zlib), FreeType (FTL), OpenSSL (Apache-2.0).";
+"关于" = "About";
+"一个 RDP 的 macOS 小工具，可用于局域网或广域网。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。" = "A small RDP client for macOS, for LAN or WAN. Uses FreeRDP; no Microsoft account or internet check.";
+"LanRDP 原始代码：MIT License，Copyright (c) 2026 xiaodaoatwc。" = "LanRDP original code: MIT License, Copyright (c) 2026 xiaodaoatwc.";
+"凭据保存在 macOS 钥匙串，并有 0600 本地 fallback；密码通过 askpass 助手传入，不出现在进程参数里。" = "Credentials are stored in the macOS Keychain with a 0600 local fallback; passwords are passed via askpass and never appear in process arguments.";
+"未找到" = "Not found";
+"未找到 sdl-freerdp" = "sdl-freerdp not found";
+"无法获取版本" = "Could not get version";
+
+/* Password prompt */
+"输入用户名和密码" = "Enter username and password";
+"输入密码" = "Enter password";
+"直接登录 %@" = "Direct login %@";
+"保存密码到钥匙串（仅此电脑）" = "Save password in Keychain (this PC only)";
+"保存到钥匙串，供其他电脑共用" = "Save in Keychain and share with other PCs";
+"密码通过标准输入传给 sdl-freerdp，不会出现在进程参数或配置文件中。" = "The password is passed to sdl-freerdp via stdin and never appears in process arguments or config files.";
+
+/* Errors */
+"未知错误" = "Unknown error";
+"钥匙串错误 %d：%@" = "Keychain error %d: %@";
+"证书缓存已清除" = "Certificate cache cleared";
+"下次连接 %@:%ld 时会重新接受/校验证书。" = "The certificate for %@:%ld will be accepted/verified again on the next connection.";
+"没有证书缓存" = "No certificate cache";
+"没有找到 %@，可以直接重新连接。" = "No cache found for %@; you can reconnect directly.";
+"清除证书失败" = "Failed to clear certificate";
+"找不到 sdl-freerdp" = "sdl-freerdp not found";
+"请确认 FreeRDP 已安装（brew install freerdp），或在“设置”中指定 sdl-freerdp 的路径。" = "Make sure FreeRDP is installed (brew install freerdp), or set the sdl-freerdp path in Settings.";
+"无法创建日志" = "Could not create log";
+"无法启动 sdl-freerdp" = "Could not start sdl-freerdp";
+"sdl-freerdp 报告连接失败" = "sdl-freerdp reported a connection failure";
+"%@ 的证书已变化" = "Certificate for %@ changed";
+"如果这是你自己的电脑，编辑这台 PC，点“清除此电脑的证书缓存”，或把证书策略改为“忽略证书错误”。" = "If this is your PC, edit it and click “Clear certificate cache for this PC”, or set the certificate policy to “Ignore certificate errors”.";
+"%@ 登录失败" = "Login failed for %@";
+"用户名或密码不正确，或者该账户不允许远程登录。" = "Incorrect username or password, or the account is not allowed to log on remotely.";
+"无法连接到 %@" = "Cannot connect to %@";
+"目标端口 %ld 没有接受连接。请确认远程桌面已开启、端口正确，并且防火墙已放行。" = "Port %ld is not accepting connections. Make sure Remote Desktop is enabled, the port is correct, and the firewall allows it.";
+"%@ 连接被服务器中止" = "Connection to %@ was terminated by the server";
+"服务器在 RDP 许可/传输阶段中止了连接。请确认目标是 Windows 专业版/企业版或 Windows Server，远程桌面许可和会话限制正常。" = "The server terminated the connection during RDP licensing/transport. Make sure the target is Windows Pro/Enterprise or Windows Server and its Remote Desktop licensing/session limits are correct.";
+"连接 %@ 超时" = "Connection to %@ timed out";
+"请检查 IP、端口 %ld、防火墙和网络；广域网还需要端口映射、VPN 或内网穿透。" = "Check the IP, port %ld, firewall, and network; WAN connections also need port forwarding, VPN, or a tunnel.";
+"%@ 的 TLS 握手失败" = "TLS handshake failed for %@";
+"确认端口 %ld 是 RDP 端口；也可以尝试把证书策略改为“忽略证书错误”。" = "Make sure port %ld is the RDP port; you can also try “Ignore certificate errors”.";
+"找不到 %@" = "Cannot find %@";
+"请检查 IP 或主机名是否正确，以及当前网络能否访问它。" = "Check the IP/hostname and whether the current network can reach it.";
+"连接 %@ 失败" = "Connection to %@ failed";
+"请检查网络和远程桌面设置；详细原因可以查看日志。" = "Check the network and Remote Desktop settings; open the log for details.";
+"“%@”的连接配置会被删除，已保存的凭据不会删除。" = "The connection “%@” will be deleted. Saved credentials are not deleted.";
+"分组“%@”会被删除，里面的电脑会移到“所有电脑”，不会删除电脑本身。" = "Group “%@” will be deleted. Its PCs will move to “All PCs”; the PCs themselves are not deleted.";
+
+/* macOS sheet titles */
+
+"编辑凭据" = "Edit credential";
+"重命名分组" = "Rename group";

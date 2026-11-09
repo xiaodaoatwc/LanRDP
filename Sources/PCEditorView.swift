@@ -39,7 +39,7 @@ struct PCEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(isNew ? "添加 PC" : "编辑 PC")
+                Text(LocalizedStringKey(isNew ? "添加 PC" : "编辑 PC"))
                     .font(.title2.weight(.semibold))
                 Spacer()
             }
@@ -78,7 +78,7 @@ struct PCEditorView: View {
                         HStack {
                             Button("清除此电脑保存的密码") {
                                 store.clearPassword(for: draft)
-                                passwordMessage = "已清除"
+                                passwordMessage = L10n.t("已清除")
                             }
                             Spacer()
                             if let passwordMessage {
@@ -133,7 +133,7 @@ struct PCEditorView: View {
                                 }
                             }
                             .fixedSize()
-                            Text("当前：\(draft.width)×\(draft.height)")
+                            Text(L10n.f("当前：%ld×%ld", draft.width, draft.height))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -231,7 +231,7 @@ struct PCEditorView: View {
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Button(isNew ? "添加" : "保存") {
+                Button(LocalizedStringKey(isNew ? "添加" : "保存")) {
                     save()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -308,12 +308,12 @@ struct PCEditorView: View {
         if FileManager.default.fileExists(atPath: url.path) {
             do {
                 try FileManager.default.removeItem(at: url)
-                certificateMessage = "已清除"
+                certificateMessage = L10n.t("已清除")
             } catch {
-                certificateMessage = "清除失败"
+                certificateMessage = L10n.t("清除失败")
             }
         } else {
-            certificateMessage = "没有缓存"
+            certificateMessage = L10n.t("没有缓存")
         }
     }
 
@@ -336,19 +336,19 @@ struct PCEditorView: View {
         candidate.folderPath = candidate.folderPath.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !candidate.host.isEmpty else {
-            errorMessage = "请填写 Windows 电脑的 IP 或主机名。"
+            errorMessage = L10n.t("请填写 Windows 电脑的 IP 或主机名。")
             return
         }
         guard candidate.port >= 1 && candidate.port <= 65535 else {
-            errorMessage = "端口需要在 1–65535 之间。"
+            errorMessage = L10n.t("端口需要在 1–65535 之间。")
             return
         }
         guard candidate.width >= 640 && candidate.height >= 480 else {
-            errorMessage = "窗口分辨率至少为 640×480。"
+            errorMessage = L10n.t("窗口分辨率至少为 640×480。")
             return
         }
         if candidate.shareFolder && candidate.folderPath.isEmpty {
-            errorMessage = "开启文件夹共享后需要选择一个本地文件夹。"
+            errorMessage = L10n.t("开启文件夹共享后需要选择一个本地文件夹。")
             return
         }
         if candidate.name.isEmpty {

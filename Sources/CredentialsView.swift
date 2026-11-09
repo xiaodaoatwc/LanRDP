@@ -67,7 +67,7 @@ struct CredentialsView: View {
             }
             Button("取消", role: .cancel) { deletingCredential = nil }
         } message: { credential in
-            Text("“\(credential.name)”会从钥匙串删除；使用它的电脑会变成“未选择凭据”，需要重新指定。")
+            Text(L10n.f("“%@”会从钥匙串删除；使用它的电脑会变成“未选择凭据”，需要重新指定。", credential.name))
         }
     }
 
@@ -76,7 +76,7 @@ struct CredentialsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("凭据")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("\(store.credentials.count) 套凭据 · 可被多台电脑共用")
+                Text(L10n.f("%ld 套凭据 · 可被多台电脑共用", store.credentials.count))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -125,7 +125,7 @@ private struct CredentialRow: View {
 
             Spacer()
 
-            Text(usedCount == 0 ? "未使用" : "\(usedCount) 台电脑")
+            Text(usedCount == 0 ? L10n.t("未使用") : L10n.f("%ld 台电脑", usedCount))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

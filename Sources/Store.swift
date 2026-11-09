@@ -7,7 +7,12 @@ final class Store: ObservableObject {
     @Published var pcs: [PC] = [] { didSet { scheduleSave() } }
     @Published var groups: [PCGroup] = [] { didSet { scheduleSave() } }
     @Published var credentials: [Credential] = [] { didSet { scheduleSave() } }
-    @Published var settings: AppSettings = AppSettings() { didSet { scheduleSave() } }
+    @Published var settings: AppSettings = AppSettings() {
+        didSet {
+            L10n.language = settings.language
+            scheduleSave()
+        }
+    }
 
     @Published var activeSessionIDs: Set<UUID> = []
     @Published var lastError: AppAlert?
@@ -48,6 +53,7 @@ final class Store: ObservableObject {
         try? fileManager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
         load()
+        L10n.language = settings.language
         migrateKeychainLabels()
     }
 
@@ -208,16 +214,16 @@ final class Store: ObservableObject {
         do {
             try FileManager.default.removeItem(at: url)
             lastError = AppAlert(
-                title: "证书缓存已清除",
-                message: "下次连接 \(pc.host):\(pc.port) 时会重新接受/校验证书。"
+                title: L10n.t("证书缓存已清除"),
+                message: L10n.f("下次连接 %@:%ld 时会重新接受/校验证书。", pc.host, pc.port)
             )
         } catch let error as CocoaError where error.code == .fileNoSuchFile {
             lastError = AppAlert(
-                title: "没有证书缓存",
-                message: "没有找到 \(url.lastPathComponent)，可以直接重新连接。"
+                title: L10n.t("没有证书缓存"),
+                message: L10n.f("没有找到 %@，可以直接重新连接。", url.lastPathComponent)
             )
         } catch {
-            lastError = AppAlert(title: "清除证书失败", message: error.localizedDescription)
+            lastError = AppAlert(title: L10n.t("清除证书失败"), message: error.localizedDescription)
         }
     }
 
@@ -372,8 +378,8 @@ final class Store: ObservableObject {
     func launch(pc: PC, username: String, domain: String, password: String) {
         guard let binary = resolvedBinaryPath else {
             lastError = AppAlert(
-                title: "找不到 sdl-freerdp",
-                message: "请确认 FreeRDP 已安装（brew install freerdp），或在“设置”中指定 sdl-freerdp 的路径。"
+                title: L10n.t("找不到 sdl-freerdp"),
+                message: L10n.t("请确认 FreeRDP 已安装（brew install freerdp），或在“设置”中指定 sdl-freerdp 的路径。")
             )
             return
         }
@@ -387,7 +393,7 @@ final class Store: ObservableObject {
         let logURL = logsDirectory.appendingPathComponent("\(pc.id.uuidString).log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         guard let logHandle = try? FileHandle(forWritingTo: logURL) else {
-            lastError = AppAlert(title: "无法创建日志", message: logURL.path)
+            lastError = AppAlert(title: L10n.t("无法创建日志"), message: logURL.path)
             return
         }
 
@@ -444,7 +450,7 @@ final class Store: ObservableObject {
         } catch {
             try? logHandle.close()
             cleanupAskpass(for: pc.id)
-            lastError = AppAlert(title: "无法启动 sdl-freerdp", message: error.localizedDescription)
+            lastError = AppAlert(title: L10n.t("无法启动 sdl-freerdp"), message: error.localizedDescription)
             return
         }
 
@@ -494,7 +500,7 @@ final class Store: ObservableObject {
                 self.lastError = self.failureAlert(
                     displayName: displayName,
                     port: port,
-                    log: tail.isEmpty ? "sdl-freerdp 报告连接失败" : tail
+                    log: tail.isEmpty ? L10n.t("sdl-freerdp 报告连接失败") : tail
                 )
                 if running.isRunning {
                     running.terminate()
@@ -510,8 +516,8 @@ final class Store: ObservableObject {
 
         if lower.contains("host key verification failed") {
             return AppAlert(
-                title: "\(displayName) 的证书已变化",
-                message: "如果这是你自己的电脑，编辑这台 PC，点“清除此电脑的证书缓存”，或把证书策略改为“忽略证书错误”。",
+                title: L10n.f("%@ 的证书已变化", displayName),
+                message: L10n.t("如果这是你自己的电脑，编辑这台 PC，点“清除此电脑的证书缓存”，或把证书策略改为“忽略证书错误”。"),
                 showLogs: false
             )
         }
@@ -521,16 +527,16 @@ final class Store: ObservableObject {
             || lower.contains("errconnect_logon_failure") || lower.contains("errconnect_password")
             || lower.contains("errconnect_account") {
             return AppAlert(
-                title: "\(displayName) 登录失败",
-                message: "用户名或密码不正确，或者该账户不允许远程登录。",
+                title: L10n.f("%@ 登录失败", displayName),
+                message: L10n.t("用户名或密码不正确，或者该账户不允许远程登录。"),
                 showLogs: false
             )
         }
 
         if lower.contains("connection refused") {
             return AppAlert(
-                title: "无法连接到 \(displayName)",
-                message: "目标端口 \(port) 没有接受连接。请确认远程桌面已开启、端口正确，并且防火墙已放行。",
+                title: L10n.f("无法连接到 %@", displayName),
+                message: L10n.f("目标端口 %ld 没有接受连接。请确认远程桌面已开启、端口正确，并且防火墙已放行。", port),
                 showLogs: true
             )
         }
@@ -538,8 +544,8 @@ final class Store: ObservableObject {
         if lower.contains("license connection sequence aborted") || lower.contains("state_run_failed")
             || lower.contains("errconnect_connect_transport_failed") || lower.contains("freerdp_post_connect failed") {
             return AppAlert(
-                title: "\(displayName) 连接被服务器中止",
-                message: "服务器在 RDP 许可/传输阶段中止了连接。请确认目标是 Windows 专业版/企业版或 Windows Server，远程桌面许可和会话限制正常。",
+                title: L10n.f("%@ 连接被服务器中止", displayName),
+                message: L10n.t("服务器在 RDP 许可/传输阶段中止了连接。请确认目标是 Windows 专业版/企业版或 Windows Server，远程桌面许可和会话限制正常。"),
                 showLogs: true
             )
         }
@@ -548,31 +554,31 @@ final class Store: ObservableObject {
             || lower.contains("failed to connect") || lower.contains("errconnect_connect_failed")
             || lower.contains("timeout") {
             return AppAlert(
-                title: "连接 \(displayName) 超时",
-                message: "请检查 IP、端口 \(port)、防火墙和网络；广域网还需要端口映射、VPN 或内网穿透。",
+                title: L10n.f("连接 %@ 超时", displayName),
+                message: L10n.f("请检查 IP、端口 %ld、防火墙和网络；广域网还需要端口映射、VPN 或内网穿透。", port),
                 showLogs: true
             )
         }
 
         if lower.contains("tls") || lower.contains("certificate") {
             return AppAlert(
-                title: "\(displayName) 的 TLS 握手失败",
-                message: "确认端口 \(port) 是 RDP 端口；也可以尝试把证书策略改为“忽略证书错误”。",
+                title: L10n.f("%@ 的 TLS 握手失败", displayName),
+                message: L10n.f("确认端口 %ld 是 RDP 端口；也可以尝试把证书策略改为“忽略证书错误”。", port),
                 showLogs: true
             )
         }
 
         if lower.contains("name lookup") || lower.contains("dns") || lower.contains("not found") {
             return AppAlert(
-                title: "找不到 \(displayName)",
-                message: "请检查 IP 或主机名是否正确，以及当前网络能否访问它。",
+                title: L10n.f("找不到 %@", displayName),
+                message: L10n.t("请检查 IP 或主机名是否正确，以及当前网络能否访问它。"),
                 showLogs: true
             )
         }
 
         return AppAlert(
-            title: "连接 \(displayName) 失败",
-            message: "请检查网络和远程桌面设置；详细原因可以查看日志。",
+            title: L10n.f("连接 %@ 失败", displayName),
+            message: L10n.t("请检查网络和远程桌面设置；详细原因可以查看日志。"),
             showLogs: true
         )
     }

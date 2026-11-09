@@ -77,7 +77,7 @@ struct PCListContent: View {
             return name
         }
         let user = (pc.username ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return user.isEmpty ? "直接输入" : "直接：\(user)"
+        return user.isEmpty ? L10n.t("直接输入") : L10n.f("直接：%@", user)
     }
 
     private var header: some View {
@@ -85,7 +85,7 @@ struct PCListContent: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("\(pcs.count) 台电脑 · \(subtitle)")
+                Text(L10n.f("%ld 台电脑 · %@", pcs.count, subtitle))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -130,11 +130,11 @@ struct PCCard: View {
     private var displaySummary: String {
         switch pc.displayMode {
         case .fullScreen:
-            return "全屏 · \(pc.scaling)%"
+            return L10n.f("全屏 · %ld%%", pc.scaling)
         case .fitWindow:
-            return "\(pc.width)×\(pc.height) · 动态 · \(pc.scaling)%"
+            return L10n.f("%ld×%ld · 动态 · %ld%%", pc.width, pc.height, pc.scaling)
         case .fixedSize:
-            return "\(pc.width)×\(pc.height) · 固定 · \(pc.scaling)%"
+            return L10n.f("%ld×%ld · 固定 · %ld%%", pc.width, pc.height, pc.scaling)
         }
     }
 
@@ -183,7 +183,8 @@ struct PCCard: View {
                 if let credentialName {
                     Label(
                         credentialName,
-                        systemImage: credentialName.hasPrefix("直接") ? "person" : "key"
+                        systemImage: (credentialName.hasPrefix("直接") || credentialName.hasPrefix("Direct"))
+                            ? "person" : "key"
                     )
                     .lineLimit(1)
                 }
@@ -210,7 +211,10 @@ struct PCCard: View {
                 Spacer(minLength: 4)
 
                 Button(action: onConnect) {
-                    Label(isActive ? "连接中" : "连接", systemImage: isActive ? "hourglass" : "play.fill")
+                    Label(
+                        LocalizedStringKey(isActive ? "连接中" : "连接"),
+                        systemImage: isActive ? "hourglass" : "play.fill"
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)

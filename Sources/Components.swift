@@ -17,7 +17,7 @@ struct GroupNameEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(.title2.weight(.semibold))
 
             TextField("分组名称", text: $name)
@@ -46,7 +46,7 @@ struct GroupNameEditor: View {
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            errorMessage = "分组名称不能为空。"
+            errorMessage = L10n.t("分组名称不能为空。")
             return
         }
         onSave(trimmed)
@@ -102,10 +102,10 @@ struct PasswordPromptView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(isDirect ? "输入用户名和密码" : "输入密码")
+                Text(LocalizedStringKey(isDirect ? "输入用户名和密码" : "输入密码"))
                     .font(.title2.weight(.semibold))
                 if isDirect {
-                    Text("直接登录 \(target)")
+                    Text(L10n.f("直接登录 %@", target))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -131,7 +131,7 @@ struct PasswordPromptView: View {
                 .onSubmit(connect)
 
             Toggle(
-                isDirect ? "保存密码到钥匙串（仅此电脑）" : "保存到钥匙串，供其他电脑共用",
+                LocalizedStringKey(isDirect ? "保存密码到钥匙串（仅此电脑）" : "保存到钥匙串，供其他电脑共用"),
                 isOn: $savePassword
             )
 

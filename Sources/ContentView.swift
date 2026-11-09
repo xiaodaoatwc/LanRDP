@@ -127,7 +127,7 @@ struct ContentView: View {
             }
             Button("取消", role: .cancel) { deletingPC = nil }
         } message: { pc in
-            Text("“\(pc.name.isEmpty ? pc.host : pc.name)”的连接配置会被删除，已保存的凭据不会删除。")
+            Text(L10n.f("“%@”的连接配置会被删除，已保存的凭据不会删除。", pc.name.isEmpty ? pc.host : pc.name))
         }
         .confirmationDialog(
             "删除分组？",
@@ -146,7 +146,7 @@ struct ContentView: View {
             }
             Button("取消", role: .cancel) { deletingGroup = nil }
         } message: { group in
-            Text("分组“\(group.name)”会被删除，里面的电脑会移到“所有电脑”，不会删除电脑本身。")
+            Text(L10n.f("分组“%@”会被删除，里面的电脑会移到“所有电脑”，不会删除电脑本身。", group.name))
         }
     }
 
@@ -155,8 +155,8 @@ struct ContentView: View {
         switch selection {
         case .all:
             PCListContent(
-                title: "所有电脑",
-                subtitle: "局域网 / 广域网远程桌面",
+                title: L10n.t("所有电脑"),
+                subtitle: L10n.t("局域网 / 广域网远程桌面"),
                 pcs: store.pcs,
                 onAdd: { showAddPC = true },
                 onConnect: { store.connect($0) },
@@ -167,7 +167,7 @@ struct ContentView: View {
             if let group = store.group(for: id) {
                 PCListContent(
                     title: group.name,
-                    subtitle: "分组",
+                    subtitle: L10n.t("分组"),
                     pcs: store.pcs.filter { $0.groupID == id },
                     onAdd: { showAddPC = true },
                     onConnect: { store.connect($0) },

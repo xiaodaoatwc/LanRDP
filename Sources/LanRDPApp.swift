@@ -6,7 +6,7 @@ struct LanRDPApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(store)
                 .frame(minWidth: 980, minHeight: 620)
         }
@@ -17,9 +17,27 @@ struct LanRDPApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsRootView()
                 .environmentObject(store)
                 .frame(width: 580, height: 460)
         }
+    }
+}
+
+private struct RootView: View {
+    @EnvironmentObject private var store: Store
+
+    var body: some View {
+        ContentView()
+            .environment(\.locale, Locale(identifier: store.settings.language.localeIdentifier))
+    }
+}
+
+private struct SettingsRootView: View {
+    @EnvironmentObject private var store: Store
+
+    var body: some View {
+        SettingsView()
+            .environment(\.locale, Locale(identifier: store.settings.language.localeIdentifier))
     }
 }

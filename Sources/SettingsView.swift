@@ -8,7 +8,7 @@ struct SettingsView: View {
     @State private var isChecking = false
 
     private var resolvedPath: String {
-        store.resolvedBinaryPath ?? "未找到"
+        store.resolvedBinaryPath ?? L10n.t("未找到")
     }
 
     var body: some View {
@@ -29,11 +29,19 @@ struct SettingsView: View {
             Divider()
 
             Form {
+                Section(L10n.t("语言")) {
+                    Picker(L10n.t("语言"), selection: $store.settings.language) {
+                        ForEach(AppLanguage.allCases) { language in
+                            Text(language.title).tag(language)
+                        }
+                    }
+                }
+
                 Section("FreeRDP") {
                     TextField("sdl-freerdp 路径", text: $store.settings.binaryPath, prompt: Text("留空则自动检测"))
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("当前使用：\(resolvedPath)")
+                        Text(L10n.f("当前使用：%@", resolvedPath))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
@@ -100,7 +108,7 @@ struct SettingsView: View {
                             .font(.system(size: 28))
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("LanRDP 1.12")
+                            Text("LanRDP 1.13 beta 1")
                                 .font(.headline)
                             Text("一个 RDP 的 macOS 小工具，可用于局域网或广域网。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。")
                                 .font(.caption)
@@ -150,7 +158,7 @@ struct SettingsView: View {
 
     private func checkVersion() {
         guard let binary = store.resolvedBinaryPath else {
-            versionText = "未找到 sdl-freerdp"
+            versionText = L10n.t("未找到 sdl-freerdp")
             return
         }
         isChecking = true
@@ -158,7 +166,7 @@ struct SettingsView: View {
         Task {
             let version = await RDPLauncher.version(of: binary)
             await MainActor.run {
-                versionText = version ?? "无法获取版本"
+                versionText = version ?? L10n.t("无法获取版本")
                 isChecking = false
             }
         }

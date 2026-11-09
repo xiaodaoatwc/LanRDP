@@ -1,8 +1,15 @@
 # LanRDP
 
+[English](README.en.md) | 简体中文
+
 一个局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
+
+## 1.13 beta 1
+
+- 中英双语界面：跟随系统 / 简体中文 / English。
+- 设置页可切换语言，立即生效。
 
 ## 1.12 更新
 
