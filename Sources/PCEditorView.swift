@@ -149,6 +149,15 @@ struct PCEditorView: View {
                         Text("200% (Retina)").tag(200)
                     }
 
+                    Picker("画质", selection: qualityBinding) {
+                        ForEach(QualityPreset.allCases) { preset in
+                            Text(preset.title).tag(preset)
+                        }
+                    }
+                    Text((draft.quality ?? .auto).detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Toggle("动态分辨率", isOn: $draft.dynamicResolution)
                     Toggle("多显示器", isOn: $draft.multiMonitor)
                     Toggle("管理员会话（/admin）", isOn: adminBinding)
@@ -280,6 +289,13 @@ struct PCEditorView: View {
         // whether the Dock is on the left, right or bottom.
         draft.width = Int(screen.visibleFrame.width)
         draft.height = Int(screen.visibleFrame.height)
+    }
+
+    private var qualityBinding: Binding<QualityPreset> {
+        Binding(
+            get: { draft.quality ?? .auto },
+            set: { draft.quality = $0 }
+        )
     }
 
     private var adminBinding: Binding<Bool> {

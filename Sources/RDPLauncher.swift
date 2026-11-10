@@ -24,7 +24,12 @@ enum RDPLauncher {
         return candidates.first { fm.isExecutableFile(atPath: $0) }
     }
 
-    static func buildArguments(pc: PC, username: String, domain: String) -> [String] {
+    static func buildArguments(
+        pc: PC,
+        username: String,
+        domain: String,
+        quality: QualityPreset = .balanced
+    ) -> [String] {
         var args: [String] = []
 
         let host = pc.host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -103,12 +108,30 @@ enum RDPLauncher {
             args.append("/drive:MacShare,\(pc.folderPath)")
         }
 
-        args.append("/network:lan")
+        args.append(contentsOf: qualityArguments(quality))
         // The SDL connection dialog is a small black progress window; the
         // manager app reports errors itself using the FreeRDP log.
         args.append("-sdl-connection-dialog")
         args.append(contentsOf: parseExtraArguments(pc.extraArguments))
         return args
+    }
+
+    static func qualityArguments(_ quality: QualityPreset) -> [String] {
+        switch quality {
+        case .auto, .balanced:
+            return ["/network:auto", "/bpp:24"]
+        case .high:
+            return ["/network:lan", "/bpp:32"]
+        case .saver:
+            return [
+                "/network:wan",
+                "/bpp:16",
+                "+nsc",
+                "-themes",
+                "-wallpaper",
+                "-menu-anims"
+            ]
+        }
     }
 
     static func savedCertificateURL(for pc: PC) -> URL {

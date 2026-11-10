@@ -215,3 +215,15 @@
 
 "编辑凭据" = "Edit credential";
 "重命名分组" = "Rename group";
+
+/* Quality presets */
+"画质" = "Quality";
+"自动" = "Auto";
+"高质量" = "High quality";
+"平衡" = "Balanced";
+"省流量" = "Data saver";
+"检测网络…" = "Checking network…";
+"连接前探测 RTT 和抖动，自动选择档位；VPN/公网最高使用平衡，不确定时也使用平衡。" = "Probes RTT and jitter before connecting. VPN/public connections are capped at Balanced; uncertain results also use Balanced.";
+"32 位色，局域网带宽优先。适合直连局域网。" = "32-bit color, LAN bandwidth priority. Best for direct LAN connections.";
+"24 位色，自动选择网络类型。适合大多数 VPN/公网连接。" = "24-bit color with automatic network type. Best for most VPN/public connections.";
+"16 位色，启用 NSC，关闭壁纸、主题和菜单动画。适合高延迟或低带宽。" = "16-bit color, NSC enabled, wallpaper/themes/menu animations disabled. Best for high latency or low bandwidth.";

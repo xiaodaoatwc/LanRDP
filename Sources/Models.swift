@@ -84,6 +84,7 @@ struct PC: Identifiable, Codable, Hashable {
     var width: Int = 1440
     var height: Int = 900
     var scaling: Int = 100
+    var quality: QualityPreset? = .auto
     var dynamicResolution: Bool = true
     var clipboard: Bool = true
     var audio: Bool = true
@@ -94,6 +95,8 @@ struct PC: Identifiable, Codable, Hashable {
     var certificatePolicy: CertificatePolicy = .ignore
     var extraArguments: String = ""
     var lastConnected: Date?
+
+    var qualityPreset: QualityPreset { quality ?? .auto }
 }
 
 struct AppSettings: Codable, Hashable {

@@ -15,6 +15,7 @@ final class Store: ObservableObject {
     }
 
     @Published var activeSessionIDs: Set<UUID> = []
+    @Published var probingPCIDs: Set<UUID> = []
     @Published var lastError: AppAlert?
     @Published var pendingPassword: PasswordPrompt?
 
@@ -320,7 +321,7 @@ final class Store: ObservableObject {
     func connect(_ pc: PC) {
         if let credential = credential(for: pc) {
             if let password = password(for: credential), !password.isEmpty {
-                launch(pc: pc, username: credential.username, domain: credential.domain, password: password)
+                beginLaunch(pc: pc, username: credential.username, domain: credential.domain, password: password)
             } else {
                 pendingPassword = PasswordPrompt(
                     pc: pc,
@@ -335,7 +336,7 @@ final class Store: ObservableObject {
         let username = (pc.username ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let domain = (pc.domain ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if let password = password(for: pc), !password.isEmpty {
-            launch(pc: pc, username: username, domain: domain, password: password)
+            beginLaunch(pc: pc, username: username, domain: domain, password: password)
         } else {
             pendingPassword = PasswordPrompt(
                 pc: pc,
@@ -372,10 +373,44 @@ final class Store: ObservableObject {
                 setPassword(password, for: updated)
             }
         }
-        launch(pc: updated, username: username, domain: domain, password: password)
+        beginLaunch(pc: updated, username: username, domain: domain, password: password)
     }
 
-    func launch(pc: PC, username: String, domain: String, password: String) {
+    private func beginLaunch(pc: PC, username: String, domain: String, password: String) {
+        guard !probingPCIDs.contains(pc.id) else { return }
+
+        let preset = pc.qualityPreset
+        if preset != .auto {
+            launch(pc: pc, username: username, domain: domain, password: password, quality: preset)
+            return
+        }
+
+        probingPCIDs.insert(pc.id)
+        Task { [weak self] in
+            guard let self else { return }
+            let resolution = await NetworkProbe.resolve(
+                host: pc.host,
+                port: UInt16(clamping: pc.port)
+            )
+            self.probingPCIDs.remove(pc.id)
+            NSLog("LanRDP auto quality: %@", resolution.summary)
+            self.launch(
+                pc: pc,
+                username: username,
+                domain: domain,
+                password: password,
+                quality: resolution.preset
+            )
+        }
+    }
+
+    func launch(
+        pc: PC,
+        username: String,
+        domain: String,
+        password: String,
+        quality: QualityPreset = .balanced
+    ) {
         guard let binary = resolvedBinaryPath else {
             lastError = AppAlert(
                 title: L10n.t("找不到 sdl-freerdp"),
@@ -399,7 +434,12 @@ final class Store: ObservableObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = RDPLauncher.buildArguments(pc: pc, username: username, domain: domain)
+        process.arguments = RDPLauncher.buildArguments(
+            pc: pc,
+            username: username,
+            domain: domain,
+            quality: quality
+        )
         process.currentDirectoryURL = logsDirectory
         process.standardOutput = FileHandle.nullDevice
         process.standardError = logHandle

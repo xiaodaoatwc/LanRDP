@@ -38,6 +38,18 @@ struct SmokeTest {
         pc100.scaling = 100
         let args100 = RDPLauncher.buildArguments(pc: pc100, username: "linc", domain: "")
         expect(args100.contains("/scale:100"), "explicit 100% DPI")
+
+        expect(pc.qualityPreset == .auto, "new PCs default to auto quality")
+        let highArgs = RDPLauncher.buildArguments(pc: pc, username: "linc", domain: "", quality: .high)
+        expect(highArgs.contains("/network:lan"), "high quality uses LAN network")
+        expect(highArgs.contains("/bpp:32"), "high quality uses 32 bpp")
+        let balancedArgs = RDPLauncher.buildArguments(pc: pc, username: "linc", domain: "", quality: .balanced)
+        expect(balancedArgs.contains("/network:auto"), "balanced quality uses auto network")
+        expect(balancedArgs.contains("/bpp:24"), "balanced quality uses 24 bpp")
+        let saverArgs = RDPLauncher.buildArguments(pc: pc, username: "linc", domain: "", quality: .saver)
+        expect(saverArgs.contains("/network:wan"), "saver uses WAN network")
+        expect(saverArgs.contains("/bpp:16"), "saver uses 16 bpp")
+        expect(saverArgs.contains("+nsc"), "saver enables NSC")
         expect(args.contains("/drive:MacShare,/Users/linc/Downloads"), "folder sharing")
         expect(args.contains("-sound"), "audio disabled")
         expect(args.contains("-sdl-connection-dialog"), "SDL connection dialog disabled")

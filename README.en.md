@@ -12,6 +12,7 @@ It works on LAN or WAN; WAN access usually needs port forwarding, a VPN, or a tu
 - Shared credentials or direct username/password login
 - Passwords stored in the macOS Keychain (with a 0600 local fallback)
 - Display modes: window, full screen, fixed resolution
+- Quality presets: Auto / High quality / Balanced / Data saver; Auto probes RTT and jitter before connecting
 - Common resolution presets and "use visible desktop" (excludes Dock/menu bar)
 - Retina/high-DPI scaling: 100%, 125%, 150%, 175%, 180%, 200%
 - Multiple monitors, clipboard, sound

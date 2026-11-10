@@ -58,6 +58,7 @@ struct PCListContent: View {
                                 groupName: store.groupName(for: pc.groupID),
                                 credentialName: loginLabel(for: pc),
                                 isActive: store.activeSessionIDs.contains(pc.id),
+                                isProbing: store.probingPCIDs.contains(pc.id),
                                 onConnect: { onConnect(pc) },
                                 onEdit: { onEdit(pc) },
                                 onDelete: { onDelete(pc) }
@@ -119,6 +120,7 @@ struct PCCard: View {
     let groupName: String?
     let credentialName: String?
     let isActive: Bool
+    let isProbing: Bool
     let onConnect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -212,13 +214,13 @@ struct PCCard: View {
 
                 Button(action: onConnect) {
                     Label(
-                        LocalizedStringKey(isActive ? "连接中" : "连接"),
-                        systemImage: isActive ? "hourglass" : "play.fill"
+                        LocalizedStringKey(isProbing ? "检测网络…" : (isActive ? "连接中" : "连接")),
+                        systemImage: isProbing ? "network" : (isActive ? "hourglass" : "play.fill")
                     )
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(isActive)
+                .disabled(isActive || isProbing)
             }
         }
         .padding(16)
@@ -233,7 +235,7 @@ struct PCCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onTapGesture(count: 2) {
-            if !isActive { onConnect() }
+            if !isActive && !isProbing { onConnect() }
         }
         .contextMenu {
             Button("连接", action: onConnect).disabled(isActive)

@@ -6,6 +6,20 @@
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
 
+## 1.14 更新 / What's New
+
+### 中文
+
+- 每台 PC 新增画质档：自动 / 高质量 / 平衡 / 省流量，默认自动。
+- 自动档在连接前探测 RTT 和抖动；VPN/公网最高使用平衡，不确定时使用平衡。
+- 手动选择后按手动档位连接；新建 PC 默认自动。
+
+### English
+
+- Added per-PC quality presets: Auto / High quality / Balanced / Data saver, default Auto.
+- Auto probes RTT and jitter before connecting; VPN/public connections are capped at Balanced, and uncertain results fall back to Balanced.
+- Manual selections are remembered per PC; new PCs default to Auto.
+
 ## 1.13 更新 / What's New
 
 ### 中文
