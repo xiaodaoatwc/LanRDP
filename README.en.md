@@ -42,6 +42,17 @@ xattr -dr com.apple.quarantine /Applications/LanRDP.app
 
 No Homebrew, XQuartz, FreeRDP, or Microsoft Remote Desktop installation is required. FreeRDP, SDL3, SDL3_ttf, FreeType, and OpenSSL are bundled or statically linked.
 
+## Build the DMG
+
+```bash
+./scripts/make-dmg.sh \
+  build/LanRDP-universal.app \
+  build/LanRDP-<version>-universal.dmg \
+  "LanRDP"
+```
+
+The DMG root contains only `LanRDP.app` and the `Applications` shortcut. Licenses and notices stay inside the app bundle. The script sets the background, icon positions, and window size.
+
 ## Data
 
 ```text

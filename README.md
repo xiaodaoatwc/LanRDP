@@ -186,6 +186,19 @@ cd lanrdp
 
 当前 `.build` 中已经包含这些依赖和 FreeRDP 源码构建产物。
 
+### 打包 DMG
+
+```bash
+./scripts/make-dmg.sh \
+  build/LanRDP-universal.app \
+  build/LanRDP-<版本>-universal.dmg \
+  "LanRDP"
+```
+
+DMG 根目录只放 `LanRDP.app` 和 `Applications` 快捷方式，许可证和说明保留在 App 包内。背景图、图标位置和窗口大小由脚本设置。
+
+如果 `LanRDP` 卷已经挂载，先推出再打包，或给第三个参数换一个卷名。
+
 ## 保存的密码不对
 
 - 直接登录：编辑这台 PC，点 **“清除此电脑保存的密码”**，下次连接会重新询问。
