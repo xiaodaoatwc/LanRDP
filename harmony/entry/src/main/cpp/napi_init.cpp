@@ -1,4 +1,6 @@
 #include "napi/native_api.h"
+#include <freerdp/freerdp.h>
+#include <freerdp/version.h>
 
 static napi_value Add(napi_env env, napi_callback_info info)
 {
@@ -23,12 +25,20 @@ static napi_value Version(napi_env env, napi_callback_info info)
     return value;
 }
 
+static napi_value FreeRDPVersion(napi_env env, napi_callback_info info)
+{
+    napi_value value;
+    napi_create_string_utf8(env, freerdp_get_version_string(), NAPI_AUTO_LENGTH, &value);
+    return value;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
     napi_property_descriptor desc[] = {
         { "add", nullptr, Add, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "version", nullptr, Version, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "version", nullptr, Version, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "freerdpVersion", nullptr, FreeRDPVersion, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
