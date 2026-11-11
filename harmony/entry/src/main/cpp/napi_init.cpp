@@ -5,7 +5,6 @@
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
-#include <winpr/wlog.h>
 
 #include <atomic>
 #include <mutex>
@@ -240,12 +239,6 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
 {
     if (!ProbeTcp(host, port, error))
         return false;
-
-    wLog* rootLog = WLog_GetRoot();
-    if (rootLog) {
-        WLog_SetLogAppenderType(rootLog, WLOG_APPENDER_CONSOLE);
-        WLog_SetLogLevel(rootLog, WLOG_DEBUG);
-    }
 
     freerdp* instance = freerdp_new();
     if (!instance) {
