@@ -1,6 +1,6 @@
 # LanRDP
 
-[English](README.en.md) | 简体中文 | [更新日志 / Changelog](CHANGELOG.md)
+[English](README.en.md) | 简体中文 | [更新日志 / Changelog](CHANGELOG.md) | [已知问题 / Known issues](KNOWN_ISSUES.md)
 
 一个局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。

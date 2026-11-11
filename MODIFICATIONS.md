@@ -46,6 +46,12 @@ LanRDP 分发的 `sdl-freerdp` 基于 FreeRDP 3.33.0，包含以下本地修改�
 - **原因**：只改 `fullscreen(false)` 覆盖不到 macOS 绿色按钮/原生全屏退出路径，
   这条事件路径同样需要把窗口限制在可见桌面内。
 
+## 7. `client/SDL/SDL3/sdl_window.cpp`（只在实际退出全屏时调整窗口）
+
+- **修改**：`fullscreen(false)` 只在窗口原本处于全屏状态时才调用 `fitToUsableBounds()`。
+- **原因**：FreeRDP 初始化窗口模式时也会调用一次 `setFullscreen(false)`；原来的实现会把
+  `/w`、`/h` 指定的窗口尺寸直接改成可见桌面大小，导致指定分辨率失效。
+
 补丁文件位于 `patches/`，可在 FreeRDP 源码根目录执行：
 
 ```bash
@@ -55,6 +61,7 @@ patch -p1 < patches/0003-askpass-repeated.patch
 patch -p1 < patches/0004-sdl-context-hidden-window.patch
 patch -p1 < patches/0005-sdl-window-usable-bounds.patch
 patch -p1 < patches/0006-sdl-disp-native-fullscreen-exit.patch
+patch -p1 < patches/0007-sdl-window-fullscreen-only.patch
 ```
 
 修改日期：2026-11-08。

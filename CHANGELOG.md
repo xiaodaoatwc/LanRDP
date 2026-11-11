@@ -11,6 +11,8 @@ LanRDP 的主要变更记录在这里。
 - 自动档在连接前探测 RTT、抖动和路径类型；VPN/公网最高使用平衡，不确定时回退平衡。
 - 手动选择后按手动档位连接；新建 PC 默认自动。
 - 高质量：`/network:lan`、32bpp；平衡：`/network:auto`、24bpp；省流量：`/network:wan`、16bpp、NSC、关闭壁纸/主题/菜单动画。
+- 修复窗口模式连接时指定分辨率被可见桌面大小覆盖的问题（HNK-SV001-5.100）。
+- 画质档在部分服务器上看不出差异，记录在 `KNOWN_ISSUES.md`。
 
 ### English
 
@@ -18,6 +20,8 @@ LanRDP 的主要变更记录在这里。
 - Auto probes RTT, jitter, and path type before connecting; VPN/public connections are capped at Balanced, with Balanced as the fallback.
 - Manual selections are remembered per PC; new PCs default to Auto.
 - High: `/network:lan`, 32bpp; Balanced: `/network:auto`, 24bpp; Data saver: `/network:wan`, 16bpp, NSC, wallpaper/themes/menu animations disabled.
+- Fixed the specified resolution being replaced by the visible desktop size in windowed mode (HNK-SV001-5.100).
+- Quality presets may look identical on some servers; documented in `KNOWN_ISSUES.md`.
 
 ## 1.13 — 2026-11-09
 
