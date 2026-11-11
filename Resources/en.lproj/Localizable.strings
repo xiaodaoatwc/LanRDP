@@ -238,3 +238,6 @@
 "所有电脑都已经分配到分组。" = "All PCs are assigned to a group.";
 "显示最常访问" = "Show Most Visited";
 "在左侧“电脑”下显示按访问频率排序的入口。" = "Show a Most Visited entry under Computers in the sidebar.";
+
+/* PC move menu */
+"移动到分组" = "Move to group";

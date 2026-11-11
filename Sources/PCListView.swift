@@ -123,6 +123,8 @@ struct PCListContent: View {
 }
 
 struct PCCard: View {
+    @EnvironmentObject private var store: Store
+
     let pc: PC
     let groupName: String?
     let credentialName: String?
@@ -255,9 +257,42 @@ struct PCCard: View {
             }
         )
         .animation(.easeInOut(duration: 0.12), value: isSelected)
+        .onDrag {
+            NSItemProvider(object: PCDragPayload.string(for: pc.id) as NSString)
+        }
         .contextMenu {
             Button("连接", action: onConnect).disabled(isActive)
             Button("编辑…", action: onEdit)
+            Divider()
+
+            Menu("移动到分组") {
+                Button {
+                    store.movePC(pc, to: nil)
+                } label: {
+                    if pc.groupID == nil {
+                        Label(L10n.t("未分组"), systemImage: "checkmark")
+                    } else {
+                        Text(L10n.t("未分组"))
+                    }
+                }
+
+                if !store.groups.isEmpty {
+                    Divider()
+                }
+
+                ForEach(store.groups) { group in
+                    Button {
+                        store.movePC(pc, to: group.id)
+                    } label: {
+                        if pc.groupID == group.id {
+                            Label(group.name, systemImage: "checkmark")
+                        } else {
+                            Text(group.name)
+                        }
+                    }
+                }
+            }
+
             Divider()
             Button("删除", role: .destructive, action: onDelete)
         }

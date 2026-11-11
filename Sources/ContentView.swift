@@ -157,11 +157,6 @@ struct ContentView: View {
                 selection = .all
             }
         }
-        .onChange(of: store.ungroupedPCs.count) { _, count in
-            if count == 0, selection == .ungrouped {
-                selection = .all
-            }
-        }
     }
 
     @ViewBuilder

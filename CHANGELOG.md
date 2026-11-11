@@ -16,6 +16,7 @@ LanRDP 的主要变更记录在这里。
 - 左侧新增“最常访问”，按累计访问次数排序，可在设置中隐藏。
 - 未分组 PC 自动归入“未分组”虚拟分组。
 - 单击 PC 卡片显示选中样式，双击仍然连接。
+- 支持把 PC 拖放到左侧分组或“未分组”；右键菜单也提供“移动到分组”。
 
 ### English
 
@@ -28,6 +29,7 @@ LanRDP 的主要变更记录在这里。
 - Added “Most visited” in the sidebar, sorted by total connection count; can be hidden in Settings.
 - Ungrouped PCs are collected under the virtual “Ungrouped” group.
 - Clicking a PC card highlights it; double-click still connects.
+- Drag a PC onto a sidebar group or “Ungrouped”; the context menu also has “Move to group”.
 
 ## 1.13 — 2026-11-09
 

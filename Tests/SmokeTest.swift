@@ -103,6 +103,21 @@ struct SmokeTest {
         }
         expect(mostVisited == ["Frequent", "Recent"], "most visited sorts by visit count and excludes never-visited PCs")
 
+        let dragID = UUID()
+        expect(PCDragPayload.id(from: PCDragPayload.string(for: dragID)) == dragID, "PC drag payload round trip")
+
+        let movedGroupID = await MainActor.run { () -> UUID? in
+            guard let group = store.addGroup(named: "Drag target") else { return nil }
+            let movable = PC(name: "Movable", host: "192.168.1.30")
+            store.addPC(movable)
+            store.movePC(movable, to: group.id)
+            let grouped = store.pcs.first(where: { $0.id == movable.id })?.groupID == group.id
+            store.movePC(movable, to: nil)
+            let ungrouped = store.pcs.first(where: { $0.id == movable.id })?.groupID == nil
+            return grouped && ungrouped ? group.id : nil
+        }
+        expect(movedGroupID != nil, "PC can be moved to a group and back to ungrouped")
+
         let directPending = await MainActor.run { () -> PasswordPrompt? in
             let direct = PC(name: "Direct", host: "192.168.1.11")
             store.addPC(direct)

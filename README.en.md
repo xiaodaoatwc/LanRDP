@@ -10,6 +10,7 @@ It works on LAN or WAN; WAN access usually needs port forwarding, a VPN, or a tu
 
 - Add, edit, and organize PCs into groups
 - Most visited and ungrouped collections in the sidebar
+- Drag PCs onto groups, or move them from the context menu
 - Shared credentials or direct username/password login
 - Passwords stored in the macOS Keychain (with a 0600 local fallback)
 - Display modes: window, full screen, fixed resolution

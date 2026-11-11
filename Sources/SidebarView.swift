@@ -23,17 +23,21 @@ struct SidebarView: View {
                     Label(group.name, systemImage: "folder")
                         .badge(store.pcs.filter { $0.groupID == group.id }.count)
                         .tag(SidebarItem.group(group.id))
+                        .modifier(PCDropTarget { pcID in
+                            store.movePC(id: pcID, to: group.id)
+                        })
                         .contextMenu {
                             Button("重命名…") { onRenameGroup(group) }
                             Button("删除分组", role: .destructive) { onDeleteGroup(group) }
                         }
                 }
 
-                if !store.ungroupedPCs.isEmpty {
-                    Label("未分组", systemImage: "tray")
-                        .badge(store.ungroupedPCs.count)
-                        .tag(SidebarItem.ungrouped)
-                }
+                Label("未分组", systemImage: "tray")
+                    .badge(store.ungroupedPCs.count)
+                    .tag(SidebarItem.ungrouped)
+                    .modifier(PCDropTarget { pcID in
+                        store.movePC(id: pcID, to: nil)
+                    })
             }
 
             Section("管理") {

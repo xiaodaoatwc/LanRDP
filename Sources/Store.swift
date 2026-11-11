@@ -230,6 +230,16 @@ final class Store: ObservableObject {
         pcs.removeAll { $0.id == pc.id }
     }
 
+    func movePC(_ pc: PC, to groupID: UUID?) {
+        movePC(id: pc.id, to: groupID)
+    }
+
+    func movePC(id: UUID, to groupID: UUID?) {
+        guard let index = pcs.firstIndex(where: { $0.id == id }) else { return }
+        guard pcs[index].groupID != groupID else { return }
+        pcs[index].groupID = groupID
+    }
+
     func clearCertificate(for pc: PC) {
         let url = RDPLauncher.savedCertificateURL(for: pc)
         do {

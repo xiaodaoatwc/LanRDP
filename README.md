@@ -16,6 +16,7 @@
 - 左侧新增“最常访问”，按累计访问次数排序，可在设置中隐藏。
 - 未分组的电脑自动归入“未分组”虚拟分组。
 - 单击 PC 卡片会显示选中边框，双击仍然连接。
+- 支持把 PC 卡片拖到左侧分组；也可以右键“移动到分组”。
 
 ### English
 
@@ -25,6 +26,7 @@
 - Added “Most visited” in the sidebar, sorted by total connection count; can be hidden in Settings.
 - PCs without a group are collected under the virtual “Ungrouped” group.
 - Clicking a PC card highlights it; double-click still connects.
+- Drag a PC card onto a sidebar group, or use “Move to group” from the context menu.
 
 ## 1.13 更新 / What's New
 
