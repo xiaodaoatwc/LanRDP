@@ -58,7 +58,19 @@ Output:
 entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
-Signing is configured separately in DevEco Studio.
+## Signing
+
+In DevEco Studio:
+
+```text
+File → Project Structure → Project → Signing Configs
+```
+
+Select the `entry` module / `default` product, enable **Automatically generate signature**, and sign in with a Huawei developer account.
+
+For a real device, enable developer mode and USB debugging first. DevEco creates the debug signing material and adds a `signingConfigs` entry to `build-profile.json5`.
+
+Do not commit generated `.p12`, `.cer`, `.p7b`, or `.csr` files; they are ignored by `harmony/.gitignore`.
 
 ## Next
 
