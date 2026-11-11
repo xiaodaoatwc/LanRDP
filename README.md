@@ -13,12 +13,18 @@
 - 每台 PC 新增画质档：自动 / 高质量 / 平衡 / 省流量，默认自动。
 - 自动档在连接前探测 RTT 和抖动；VPN/公网最高使用平衡，不确定时使用平衡。
 - 手动选择后按手动档位连接；新建 PC 默认自动。
+- 左侧新增“最常访问”，按累计访问次数排序，可在设置中隐藏。
+- 未分组的电脑自动归入“未分组”虚拟分组。
+- 单击 PC 卡片会显示选中边框，双击仍然连接。
 
 ### English
 
 - Added per-PC quality presets: Auto / High quality / Balanced / Data saver, default Auto.
 - Auto probes RTT and jitter before connecting; VPN/public connections are capped at Balanced, and uncertain results fall back to Balanced.
 - Manual selections are remembered per PC; new PCs default to Auto.
+- Added “Most visited” in the sidebar, sorted by total connection count; can be hidden in Settings.
+- PCs without a group are collected under the virtual “Ungrouped” group.
+- Clicking a PC card highlights it; double-click still connects.
 
 ## 1.13 更新 / What's New
 

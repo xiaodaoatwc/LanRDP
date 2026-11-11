@@ -14,6 +14,11 @@ struct SidebarView: View {
                     .badge(store.pcs.count)
                     .tag(SidebarItem.all)
 
+                if store.settings.showMostVisited {
+                    Label("最常访问", systemImage: "clock.arrow.circlepath")
+                        .tag(SidebarItem.mostVisited)
+                }
+
                 ForEach(store.groups) { group in
                     Label(group.name, systemImage: "folder")
                         .badge(store.pcs.filter { $0.groupID == group.id }.count)
@@ -22,6 +27,12 @@ struct SidebarView: View {
                             Button("重命名…") { onRenameGroup(group) }
                             Button("删除分组", role: .destructive) { onDeleteGroup(group) }
                         }
+                }
+
+                if !store.ungroupedPCs.isEmpty {
+                    Label("未分组", systemImage: "tray")
+                        .badge(store.ungroupedPCs.count)
+                        .tag(SidebarItem.ungrouped)
                 }
             }
 

@@ -2,6 +2,8 @@ import Foundation
 
 enum SidebarItem: Hashable {
     case all
+    case mostVisited
+    case ungrouped
     case group(UUID)
     case credentials
     case settings
@@ -95,14 +97,17 @@ struct PC: Identifiable, Codable, Hashable {
     var certificatePolicy: CertificatePolicy = .ignore
     var extraArguments: String = ""
     var lastConnected: Date?
+    var visitCount: Int? = 0
 
     var qualityPreset: QualityPreset { quality ?? .auto }
+    var visitCountValue: Int { visitCount ?? 0 }
 }
 
 struct AppSettings: Codable, Hashable {
     var binaryPath: String = ""
     var defaultCertificatePolicy: CertificatePolicy = .ignore
     var language: AppLanguage = .system
+    var showMostVisited: Bool = true
 
     init() {}
 
@@ -113,6 +118,7 @@ struct AppSettings: Codable, Hashable {
             CertificatePolicy.self, forKey: .defaultCertificatePolicy
         ) ?? .ignore
         language = try container.decodeIfPresent(AppLanguage.self, forKey: .language) ?? .system
+        showMostVisited = try container.decodeIfPresent(Bool.self, forKey: .showMostVisited) ?? true
     }
 }
 

@@ -88,6 +88,21 @@ struct SmokeTest {
         let store = await MainActor.run { Store(baseDirectory: temp) }
         let binary = "/Users/linc/Documents/deepseek-harness/default-workspace/lanrdp/.build/build/freerdp-sdl/client/SDL/SDL3/sdl-freerdp"
 
+        let mostVisited = await MainActor.run { () -> [String] in
+            var frequent = PC(name: "Frequent", host: "192.168.1.20")
+            frequent.visitCount = 7
+            frequent.lastConnected = Date()
+            var recent = PC(name: "Recent", host: "192.168.1.21")
+            recent.visitCount = 3
+            recent.lastConnected = Date()
+            let never = PC(name: "Never", host: "192.168.1.22")
+            store.addPC(frequent)
+            store.addPC(recent)
+            store.addPC(never)
+            return store.mostVisitedPCs.map(\.name)
+        }
+        expect(mostVisited == ["Frequent", "Recent"], "most visited sorts by visit count and excludes never-visited PCs")
+
         let directPending = await MainActor.run { () -> PasswordPrompt? in
             let direct = PC(name: "Direct", host: "192.168.1.11")
             store.addPC(direct)

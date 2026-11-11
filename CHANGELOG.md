@@ -13,6 +13,9 @@ LanRDP 的主要变更记录在这里。
 - 高质量：`/network:lan`、32bpp；平衡：`/network:auto`、24bpp；省流量：`/network:wan`、16bpp、NSC、关闭壁纸/主题/菜单动画。
 - 修复窗口模式连接时指定分辨率被可见桌面大小覆盖的问题（HNK-SV001-5.100）。
 - 画质档在部分服务器上看不出差异，记录在 `KNOWN_ISSUES.md`。
+- 左侧新增“最常访问”，按累计访问次数排序，可在设置中隐藏。
+- 未分组 PC 自动归入“未分组”虚拟分组。
+- 单击 PC 卡片显示选中样式，双击仍然连接。
 
 ### English
 
@@ -22,6 +25,9 @@ LanRDP 的主要变更记录在这里。
 - High: `/network:lan`, 32bpp; Balanced: `/network:auto`, 24bpp; Data saver: `/network:wan`, 16bpp, NSC, wallpaper/themes/menu animations disabled.
 - Fixed the specified resolution being replaced by the visible desktop size in windowed mode (HNK-SV001-5.100).
 - Quality presets may look identical on some servers; documented in `KNOWN_ISSUES.md`.
+- Added “Most visited” in the sidebar, sorted by total connection count; can be hidden in Settings.
+- Ungrouped PCs are collected under the virtual “Ungrouped” group.
+- Clicking a PC card highlights it; double-click still connects.
 
 ## 1.13 — 2026-11-09
 

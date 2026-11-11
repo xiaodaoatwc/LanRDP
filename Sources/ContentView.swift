@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var renamingGroup: PCGroup?
     @State private var deletingPC: PC?
     @State private var deletingGroup: PCGroup?
+    @State private var selectedPCID: UUID?
 
     var body: some View {
         NavigationSplitView {
@@ -148,6 +149,19 @@ struct ContentView: View {
         } message: { group in
             Text(L10n.f("分组“%@”会被删除，里面的电脑会移到“所有电脑”，不会删除电脑本身。", group.name))
         }
+        .onChange(of: selection) { _, _ in
+            selectedPCID = nil
+        }
+        .onChange(of: store.settings.showMostVisited) { _, visible in
+            if !visible, selection == .mostVisited {
+                selection = .all
+            }
+        }
+        .onChange(of: store.ungroupedPCs.count) { _, count in
+            if count == 0, selection == .ungrouped {
+                selection = .all
+            }
+        }
     }
 
     @ViewBuilder
@@ -161,8 +175,48 @@ struct ContentView: View {
                 onAdd: { showAddPC = true },
                 onConnect: { store.connect($0) },
                 onEdit: { editingPC = $0 },
-                onDelete: { deletingPC = $0 }
+                onDelete: { deletingPC = $0 },
+                selectedPCID: $selectedPCID
             )
+        case .mostVisited:
+            if store.mostVisitedPCs.isEmpty {
+                ContentUnavailableView(
+                    "还没有访问记录",
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text("连接一台电脑后，这里会显示最常访问的电脑。")
+                )
+            } else {
+                PCListContent(
+                    title: L10n.t("最常访问"),
+                    subtitle: L10n.t("按访问频率排序"),
+                    pcs: store.mostVisitedPCs,
+                    onAdd: { showAddPC = true },
+                    onConnect: { store.connect($0) },
+                    onEdit: { editingPC = $0 },
+                    onDelete: { deletingPC = $0 },
+                    selectedPCID: $selectedPCID,
+                    preserveOrder: true
+                )
+            }
+        case .ungrouped:
+            if store.ungroupedPCs.isEmpty {
+                ContentUnavailableView(
+                    "没有未分组的电脑",
+                    systemImage: "tray",
+                    description: Text("所有电脑都已经分配到分组。")
+                )
+            } else {
+                PCListContent(
+                    title: L10n.t("未分组"),
+                    subtitle: L10n.t("未分组电脑"),
+                    pcs: store.ungroupedPCs,
+                    onAdd: { showAddPC = true },
+                    onConnect: { store.connect($0) },
+                    onEdit: { editingPC = $0 },
+                    onDelete: { deletingPC = $0 },
+                    selectedPCID: $selectedPCID
+                )
+            }
         case .group(let id):
             if let group = store.group(for: id) {
                 PCListContent(
@@ -172,7 +226,8 @@ struct ContentView: View {
                     onAdd: { showAddPC = true },
                     onConnect: { store.connect($0) },
                     onEdit: { editingPC = $0 },
-                    onDelete: { deletingPC = $0 }
+                    onDelete: { deletingPC = $0 },
+                    selectedPCID: $selectedPCID
                 )
             } else {
                 ContentUnavailableView("分组不存在", systemImage: "folder.badge.questionmark")

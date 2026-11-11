@@ -10,6 +10,8 @@ struct PCListContent: View {
     let onConnect: (PC) -> Void
     let onEdit: (PC) -> Void
     let onDelete: (PC) -> Void
+    @Binding var selectedPCID: UUID?
+    var preserveOrder = false
 
     @State private var searchText = ""
 
@@ -26,6 +28,9 @@ struct PCListContent: View {
                     || (store.credentialName(for: pc)?.localizedCaseInsensitiveContains(query) ?? false)
                     || (pc.username?.localizedCaseInsensitiveContains(query) ?? false)
             }
+        }
+        if preserveOrder {
+            return filtered
         }
         return filtered.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -59,6 +64,8 @@ struct PCListContent: View {
                                 credentialName: loginLabel(for: pc),
                                 isActive: store.activeSessionIDs.contains(pc.id),
                                 isProbing: store.probingPCIDs.contains(pc.id),
+                                isSelected: selectedPCID == pc.id,
+                                selectedPCID: $selectedPCID,
                                 onConnect: { onConnect(pc) },
                                 onEdit: { onEdit(pc) },
                                 onDelete: { onDelete(pc) }
@@ -121,6 +128,8 @@ struct PCCard: View {
     let credentialName: String?
     let isActive: Bool
     let isProbing: Bool
+    let isSelected: Bool
+    @Binding var selectedPCID: UUID?
     let onConnect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -227,16 +236,25 @@ struct PCCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color.primary.opacity(0.08),
+                    lineWidth: isSelected ? 2 : 1
+                )
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onTapGesture(count: 2) {
-            if !isActive && !isProbing { onConnect() }
+        .onTapGesture {
+            selectedPCID = pc.id
         }
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                if !isActive && !isProbing { onConnect() }
+            }
+        )
+        .animation(.easeInOut(duration: 0.12), value: isSelected)
         .contextMenu {
             Button("连接", action: onConnect).disabled(isActive)
             Button("编辑…", action: onEdit)

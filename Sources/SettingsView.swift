@@ -79,6 +79,11 @@ struct SettingsView: View {
                     Text(store.settings.defaultCertificatePolicy.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Toggle("显示最常访问", isOn: $store.settings.showMostVisited)
+                    Text("在左侧“电脑”下显示按访问频率排序的入口。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("维护") {
@@ -108,7 +113,7 @@ struct SettingsView: View {
                             .font(.system(size: 28))
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("LanRDP 1.14 beta 2")
+                            Text("LanRDP 1.14 beta 3")
                                 .font(.headline)
                             Text("一个 RDP 的 macOS 小工具，可用于局域网或广域网。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。")
                                 .font(.caption)

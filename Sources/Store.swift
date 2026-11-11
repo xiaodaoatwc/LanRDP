@@ -44,6 +44,26 @@ final class Store: ObservableObject {
     var configDirectoryURL: URL { configDirectory }
     var logsDirectoryURL: URL { logsDirectory }
 
+    var ungroupedPCs: [PC] {
+        pcs.filter { $0.groupID == nil }
+    }
+
+    var mostVisitedPCs: [PC] {
+        let visited = pcs.filter { $0.visitCountValue > 0 || $0.lastConnected != nil }
+        let sorted = visited.sorted { lhs, rhs in
+            if lhs.visitCountValue != rhs.visitCountValue {
+                return lhs.visitCountValue > rhs.visitCountValue
+            }
+            let leftDate = lhs.lastConnected ?? .distantPast
+            let rightDate = rhs.lastConnected ?? .distantPast
+            if leftDate != rightDate {
+                return leftDate > rightDate
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        return Array(sorted.prefix(6))
+    }
+
     init(baseDirectory: URL? = nil) {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -507,6 +527,7 @@ final class Store: ObservableObject {
 
         if let index = pcs.firstIndex(where: { $0.id == pc.id }) {
             pcs[index].lastConnected = Date()
+            pcs[index].visitCount = pcs[index].visitCountValue + 1
         }
     }
 
