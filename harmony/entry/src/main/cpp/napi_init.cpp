@@ -5,12 +5,21 @@
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
+#include <winpr/wlog.h>
 
 #include <atomic>
 #include <mutex>
 #include <thread>
 #include <vector>
 #include <cstring>
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cerrno>
 
 #include <string>
 
@@ -176,16 +185,77 @@ static BOOL SessionPostConnect(freerdp* instance)
     return TRUE;
 }
 
+
+static bool ProbeTcp(const std::string& host, uint32_t port, std::string& error)
+{
+    struct addrinfo hints = {};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+
+    struct addrinfo* result = nullptr;
+    const std::string service = std::to_string(port);
+    if (getaddrinfo(host.c_str(), service.c_str(), &hints, &result) != 0 || !result) {
+        error = "DNS failed";
+        return false;
+    }
+
+    bool success = false;
+    for (struct addrinfo* ai = result; ai && !success; ai = ai->ai_next) {
+        int fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) {
+            error = "socket failed " + std::to_string(errno);
+            continue;
+        }
+        const int flags = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+        if (rc < 0 && errno == EINPROGRESS) {
+            struct pollfd pfd = { fd, POLLOUT, 0 };
+            rc = poll(&pfd, 1, 8000);
+            if (rc > 0) {
+                int socketError = 0;
+                socklen_t len = sizeof(socketError);
+                getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &len);
+                success = socketError == 0;
+                if (!success)
+                    error = "TCP error " + std::to_string(socketError);
+            } else {
+                error = "TCP timeout";
+            }
+        } else if (rc == 0) {
+            success = true;
+        } else {
+            error = "TCP error " + std::to_string(errno);
+        }
+        close(fd);
+    }
+    freeaddrinfo(result);
+    return success;
+}
+
 static bool StartSession(Session* session, const std::string& host, uint32_t port,
                          const std::string& username, const std::string& password,
-                         const std::string& domain)
+                         const std::string& domain, std::string& error)
 {
-    freerdp* instance = freerdp_new();
-    if (!instance)
+    if (!ProbeTcp(host, port, error))
         return false;
+
+    wLog* rootLog = WLog_GetRoot();
+    if (rootLog) {
+        WLog_SetLogAppenderType(rootLog, WLOG_APPENDER_CONSOLE);
+        WLog_SetLogLevel(rootLog, WLOG_DEBUG);
+    }
+
+    freerdp* instance = freerdp_new();
+    if (!instance) {
+        error = "freerdp_new failed";
+        return false;
+    }
 
     instance->ContextSize = sizeof(SessionContext);
     if (!freerdp_context_new(instance)) {
+        error = "freerdp_context_new failed";
         freerdp_free(instance);
         return false;
     }
@@ -204,14 +274,19 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
         freerdp_settings_set_string(settings, FreeRDP_Domain, domain.c_str());
     freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
-    freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 5000);
+    freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000);
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, 1024);
     freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, 768);
 
     instance->PostConnect = SessionPostConnect;
 
-    if (!freerdp_connect(instance))
+    if (!freerdp_connect(instance)) {
+        UINT32 code = freerdp_get_last_error(instance->context);
+        const char* name = freerdp_get_last_error_name(code);
+        const char* text = freerdp_get_last_error_string(code);
+        error = "RDP " + std::to_string(code) + " " + (name ? name : "") + " " + (text ? text : "");
         return false;
+    }
 
     session->thread = std::thread(SessionLoop, session);
     return true;
@@ -226,6 +301,7 @@ struct ConnectWork {
     std::string domain;
     uint32_t port = 3389;
     bool connected = false;
+    std::string error;
 };
 
 static std::string GetString(napi_env env, napi_value value)
@@ -244,7 +320,7 @@ static void ExecuteConnect(napi_env env, void* data)
 {
     auto* work = static_cast<ConnectWork*>(data);
     auto* session = new Session();
-    if (StartSession(session, work->host, work->port, work->username, work->password, work->domain)) {
+    if (StartSession(session, work->host, work->port, work->username, work->password, work->domain, work->error)) {
         std::lock_guard<std::mutex> lock(g_sessionMutex);
         if (g_session)
             DestroySession(g_session);
@@ -259,7 +335,8 @@ static void CompleteConnect(napi_env env, napi_status status, void* data)
 {
     auto* work = static_cast<ConnectWork*>(data);
     napi_value result;
-    napi_create_string_utf8(env, work->connected ? "connected" : "failed", NAPI_AUTO_LENGTH, &result);
+    std::string text = work->connected ? "connected" : ("failed: " + work->error);
+    napi_create_string_utf8(env, text.c_str(), NAPI_AUTO_LENGTH, &result);
 
     if (status == napi_ok)
         napi_resolve_deferred(env, work->deferred, result);

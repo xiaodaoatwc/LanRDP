@@ -61,7 +61,7 @@ struct Index {
           this.refreshFrame();
         }, 200);
       } else {
-        this.status = '连接失败';
+        this.status = result;
       }
     } catch (error) {
       this.status = `连接失败：${String(error)}`;
