@@ -5,6 +5,8 @@
   "main": "",
   "author": "",
   "license": "",
-  "dependencies": {}
+  "dependencies": {
+    "liblanrdp.so": "file:./src/main/cpp/types/liblanrdp"
+  }
 }
 

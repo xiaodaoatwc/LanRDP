@@ -1,7 +1,9 @@
+import { add, version } from 'liblanrdp.so';
+
 @Entry
 @Component
 struct Index {
-  @State message: string = 'Hello World';
+  @State message: string = `LanRDP native ${version()} · 1 + 2 = ${add(1, 2)}`;
 
   build() {
     RelativeContainer() {
