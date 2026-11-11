@@ -2,6 +2,15 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/version.h>
 #include <freerdp/settings.h>
+#include <freerdp/gdi/gdi.h>
+#include <freerdp/codec/color.h>
+#include <winpr/synch.h>
+
+#include <atomic>
+#include <mutex>
+#include <thread>
+#include <vector>
+#include <cstring>
 
 #include <string>
 
@@ -36,6 +45,178 @@ static napi_value FreeRDPVersion(napi_env env, napi_callback_info info)
 }
 
 
+struct Session {
+    freerdp* instance = nullptr;
+    rdpContext* context = nullptr;
+    std::thread thread;
+    std::mutex mutex;
+    std::vector<uint8_t> pixels;
+    int width = 0;
+    int height = 0;
+    uint64_t version = 0;
+    std::atomic<bool> stop{ false };
+};
+
+struct SessionContext {
+    rdpContext context;
+    Session* session;
+};
+
+static std::mutex g_sessionMutex;
+static Session* g_session = nullptr;
+
+static BOOL SessionBeginPaint(rdpContext* context)
+{
+    (void)context;
+    return TRUE;
+}
+
+static BOOL SessionEndPaint(rdpContext* context)
+{
+    auto* sessionContext = reinterpret_cast<SessionContext*>(context);
+    Session* session = sessionContext ? sessionContext->session : nullptr;
+    if (!session)
+        return TRUE;
+
+    rdpGdi* gdi = context->gdi;
+    if (!gdi || !gdi->primary_buffer || gdi->width <= 0 || gdi->height <= 0)
+        return TRUE;
+
+    const int width = gdi->width;
+    const int height = gdi->height;
+    const UINT32 stride = gdi->stride;
+    const UINT32 format = gdi->dstFormat;
+    if (stride < static_cast<UINT32>(width * 4))
+        return TRUE;
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+    session->pixels.resize(static_cast<size_t>(width) * height * 4);
+    const BYTE* source = gdi->primary_buffer;
+    BYTE* target = session->pixels.data();
+
+    for (int y = 0; y < height; ++y) {
+        const BYTE* row = source + static_cast<size_t>(y) * stride;
+        for (int x = 0; x < width; ++x) {
+            const BYTE* pixel = row + x * 4;
+            BYTE* out = target + (static_cast<size_t>(y) * width + x) * 4;
+            if (format == PIXEL_FORMAT_RGBA32) {
+                out[0] = pixel[0];
+                out[1] = pixel[1];
+                out[2] = pixel[2];
+                out[3] = 255;
+            } else if (format == PIXEL_FORMAT_BGRA32 || format == PIXEL_FORMAT_BGRX32) {
+                out[0] = pixel[2];
+                out[1] = pixel[1];
+                out[2] = pixel[0];
+                out[3] = 255;
+            } else {
+                out[0] = pixel[2];
+                out[1] = pixel[1];
+                out[2] = pixel[0];
+                out[3] = 255;
+            }
+        }
+    }
+
+    session->width = width;
+    session->height = height;
+    ++session->version;
+    return TRUE;
+}
+
+static BOOL SessionDesktopResize(rdpContext* context)
+{
+    (void)context;
+    return TRUE;
+}
+
+static void SessionLoop(Session* session)
+{
+    HANDLE handles[64];
+    while (!session->stop.load()) {
+        DWORD count = freerdp_get_event_handles(session->context, handles, 64);
+        if (count == 0)
+            break;
+        DWORD status = WaitForMultipleObjects(count, handles, FALSE, 100);
+        if (status == WAIT_FAILED)
+            break;
+        if (!freerdp_check_event_handles(session->context))
+            break;
+    }
+}
+
+static void DestroySession(Session* session)
+{
+    if (!session)
+        return;
+    session->stop.store(true);
+    if (session->instance && session->context)
+        freerdp_abort_connect_context(session->context);
+    if (session->thread.joinable())
+        session->thread.join();
+    if (session->instance) {
+        freerdp_disconnect(session->instance);
+        if (session->instance->context && session->instance->context->gdi)
+            gdi_free(session->instance);
+        freerdp_context_free(session->instance);
+        freerdp_free(session->instance);
+    }
+    delete session;
+}
+
+static BOOL SessionPostConnect(freerdp* instance)
+{
+    if (!instance || !instance->context)
+        return FALSE;
+    if (!gdi_init(instance, PIXEL_FORMAT_BGRX32))
+        return FALSE;
+    instance->context->update->BeginPaint = SessionBeginPaint;
+    instance->context->update->EndPaint = SessionEndPaint;
+    instance->context->update->DesktopResize = SessionDesktopResize;
+    return TRUE;
+}
+
+static bool StartSession(Session* session, const std::string& host, uint32_t port,
+                         const std::string& username, const std::string& password,
+                         const std::string& domain)
+{
+    freerdp* instance = freerdp_new();
+    if (!instance)
+        return false;
+
+    instance->ContextSize = sizeof(SessionContext);
+    if (!freerdp_context_new(instance)) {
+        freerdp_free(instance);
+        return false;
+    }
+
+    auto* sessionContext = reinterpret_cast<SessionContext*>(instance->context);
+    sessionContext->session = session;
+    session->instance = instance;
+    session->context = instance->context;
+
+    rdpSettings* settings = instance->context->settings;
+    freerdp_settings_set_string(settings, FreeRDP_ServerHostname, host.c_str());
+    freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, port);
+    freerdp_settings_set_string(settings, FreeRDP_Username, username.c_str());
+    freerdp_settings_set_string(settings, FreeRDP_Password, password.c_str());
+    if (!domain.empty())
+        freerdp_settings_set_string(settings, FreeRDP_Domain, domain.c_str());
+    freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
+    freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 5000);
+    freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, 1024);
+    freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, 768);
+
+    instance->PostConnect = SessionPostConnect;
+
+    if (!freerdp_connect(instance))
+        return false;
+
+    session->thread = std::thread(SessionLoop, session);
+    return true;
+}
+
 struct ConnectWork {
     napi_async_work work = nullptr;
     napi_deferred deferred = nullptr;
@@ -62,33 +243,16 @@ static std::string GetString(napi_env env, napi_value value)
 static void ExecuteConnect(napi_env env, void* data)
 {
     auto* work = static_cast<ConnectWork*>(data);
-    freerdp* instance = freerdp_new();
-    if (!instance)
-        return;
-
-    if (!freerdp_context_new(instance)) {
-        freerdp_free(instance);
-        return;
-    }
-
-    rdpSettings* settings = instance->context->settings;
-    freerdp_settings_set_string(settings, FreeRDP_ServerHostname, work->host.c_str());
-    freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, work->port);
-    freerdp_settings_set_string(settings, FreeRDP_Username, work->username.c_str());
-    freerdp_settings_set_string(settings, FreeRDP_Password, work->password.c_str());
-    if (!work->domain.empty())
-        freerdp_settings_set_string(settings, FreeRDP_Domain, work->domain.c_str());
-    freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
-    freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 5000);
-
-    if (freerdp_connect(instance)) {
+    auto* session = new Session();
+    if (StartSession(session, work->host, work->port, work->username, work->password, work->domain)) {
+        std::lock_guard<std::mutex> lock(g_sessionMutex);
+        if (g_session)
+            DestroySession(g_session);
+        g_session = session;
         work->connected = true;
-        freerdp_disconnect(instance);
+    } else {
+        DestroySession(session);
     }
-
-    freerdp_context_free(instance);
-    freerdp_free(instance);
 }
 
 static void CompleteConnect(napi_env env, napi_status status, void* data)
@@ -133,6 +297,50 @@ static napi_value Connect(napi_env env, napi_callback_info info)
     return promise;
 }
 
+static napi_value StopSession(napi_env env, napi_callback_info info)
+{
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    if (g_session) {
+        DestroySession(g_session);
+        g_session = nullptr;
+    }
+    napi_value result;
+    napi_get_boolean(env, true, &result);
+    return result;
+}
+
+static napi_value GetFrame(napi_env env, napi_callback_info info)
+{
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    Session* session = g_session;
+    napi_value result;
+    napi_get_null(env, &result);
+    if (!session)
+        return result;
+
+    std::lock_guard<std::mutex> frameLock(session->mutex);
+    if (session->pixels.empty() || session->width <= 0 || session->height <= 0)
+        return result;
+
+    size_t size = session->pixels.size();
+    void* data = nullptr;
+    napi_value buffer;
+    if (napi_create_arraybuffer(env, size, &data, &buffer) != napi_ok)
+        return result;
+    std::memcpy(data, session->pixels.data(), size);
+
+    napi_value width, height, version, object;
+    napi_create_int32(env, session->width, &width);
+    napi_create_int32(env, session->height, &height);
+    napi_create_double(env, static_cast<double>(session->version), &version);
+    napi_create_object(env, &object);
+    napi_set_named_property(env, object, "width", width);
+    napi_set_named_property(env, object, "height", height);
+    napi_set_named_property(env, object, "version", version);
+    napi_set_named_property(env, object, "data", buffer);
+    return object;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -140,7 +348,9 @@ static napi_value Init(napi_env env, napi_value exports)
         { "add", nullptr, Add, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "version", nullptr, Version, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "freerdpVersion", nullptr, FreeRDPVersion, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "connect", nullptr, Connect, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "connect", nullptr, Connect, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "stopSession", nullptr, StopSession, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

@@ -1,4 +1,5 @@
-import { connect, freerdpVersion, version } from 'liblanrdp.so';
+import { image } from '@kit.ImageKit';
+import { connect, freerdpVersion, getFrame, stopSession, version } from 'liblanrdp.so';
 
 @Entry
 @Component
@@ -10,6 +11,21 @@ struct Index {
   @State private domain: string = '';
   @State private status: string = `FreeRDP ${freerdpVersion()}`;
   @State private isConnecting: boolean = false;
+  @State private frameImage: image.PixelMap | null = null;
+  @State private frameVersion: number = 0;
+  private timer: number = -1;
+
+  aboutToDisappear(): void {
+    this.stopFrameTimer();
+    stopSession();
+  }
+
+  private stopFrameTimer(): void {
+    if (this.timer >= 0) {
+      clearInterval(this.timer);
+      this.timer = -1;
+    }
+  }
 
   private async doConnect(): Promise<void> {
     const host = this.host.trim();
@@ -24,6 +40,10 @@ struct Index {
       return;
     }
 
+    this.stopFrameTimer();
+    stopSession();
+    this.frameImage = null;
+    this.frameVersion = 0;
     this.isConnecting = true;
     this.status = '连接中…';
 
@@ -35,7 +55,14 @@ struct Index {
         this.password,
         this.domain.trim()
       );
-      this.status = result === 'connected' ? '连接成功（认证通过）' : '连接失败';
+      if (result === 'connected') {
+        this.status = '连接成功，等待画面…';
+        this.timer = setInterval(() => {
+          this.refreshFrame();
+        }, 200);
+      } else {
+        this.status = '连接失败';
+      }
     } catch (error) {
       this.status = `连接失败：${String(error)}`;
     } finally {
@@ -43,18 +70,46 @@ struct Index {
     }
   }
 
+  private async refreshFrame(): Promise<void> {
+    if (this.isConnecting) {
+      return;
+    }
+    const frame = getFrame();
+    if (!frame) {
+      return;
+    }
+    if (frame.version === this.frameVersion && this.frameImage !== null) {
+      return;
+    }
+
+    try {
+      const options: image.InitializationOptions = {
+        size: { width: frame.width, height: frame.height },
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        editable: false,
+        alphaType: image.AlphaType.OPAQUE
+      };
+      const pixelMap = await image.createPixelMap(frame.data, options);
+      this.frameImage?.release();
+      this.frameImage = pixelMap;
+      this.frameVersion = frame.version;
+      this.status = `已连接 · ${frame.width}×${frame.height}`;
+    } catch (error) {
+      this.status = `渲染失败：${String(error)}`;
+    }
+  }
+
   build() {
-    Column({ space: 12 }) {
+    Column({ space: 10 }) {
       Text('LanRDP')
-        .fontSize(32)
+        .fontSize(30)
         .fontWeight(FontWeight.Bold)
         .width('100%')
 
-      Text('HarmonyOS NEXT · 连接测试')
-        .fontSize(14)
+      Text('HarmonyOS NEXT · 远程桌面')
+        .fontSize(13)
         .fontColor('#6B7280')
         .width('100%')
-        .margin({ bottom: 8 })
 
       TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
         .onChange((value: string) => {
@@ -62,33 +117,37 @@ struct Index {
         })
         .width('100%')
 
-      TextInput({ placeholder: '端口', text: this.portText })
-        .type(InputType.Number)
-        .onChange((value: string) => {
-          this.portText = value;
-        })
-        .width('100%')
+      Row({ space: 10 }) {
+        TextInput({ placeholder: '端口', text: this.portText })
+          .type(InputType.Number)
+          .onChange((value: string) => {
+            this.portText = value;
+          })
+          .layoutWeight(1)
+        TextInput({ placeholder: '用户名', text: this.username })
+          .onChange((value: string) => {
+            this.username = value;
+          })
+          .layoutWeight(2)
+      }
+      .width('100%')
 
-      TextInput({ placeholder: '用户名', text: this.username })
-        .onChange((value: string) => {
-          this.username = value;
-        })
-        .width('100%')
+      Row({ space: 10 }) {
+        TextInput({ placeholder: '密码', text: this.password })
+          .type(InputType.Password)
+          .onChange((value: string) => {
+            this.password = value;
+          })
+          .layoutWeight(2)
+        TextInput({ placeholder: '域（可选）', text: this.domain })
+          .onChange((value: string) => {
+            this.domain = value;
+          })
+          .layoutWeight(1)
+      }
+      .width('100%')
 
-      TextInput({ placeholder: '密码', text: this.password })
-        .type(InputType.Password)
-        .onChange((value: string) => {
-          this.password = value;
-        })
-        .width('100%')
-
-      TextInput({ placeholder: '域（可选）', text: this.domain })
-        .onChange((value: string) => {
-          this.domain = value;
-        })
-        .width('100%')
-
-      Button(this.isConnecting ? '连接中…' : '测试连接')
+      Button(this.isConnecting ? '连接中…' : '连接')
         .width('100%')
         .enabled(!this.isConnecting)
         .onClick(() => {
@@ -96,18 +155,36 @@ struct Index {
         })
 
       Text(this.status)
-        .fontSize(14)
-        .fontColor(this.status.includes('成功') ? '#15803D' : '#6B7280')
+        .fontSize(13)
+        .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
         .width('100%')
-        .margin({ top: 8 })
+
+      if (this.frameImage !== null) {
+        Image(this.frameImage)
+          .width('100%')
+          .layoutWeight(1)
+          .objectFit(ImageFit.Contain)
+          .backgroundColor('#000000')
+          .borderRadius(8)
+      } else {
+        Column() {
+          Text('等待远程画面…')
+            .fontSize(14)
+            .fontColor('#9CA3AF')
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor('#EEF1F6')
+        .borderRadius(8)
+      }
 
       Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
-        .fontSize(12)
+        .fontSize(11)
         .fontColor('#9CA3AF')
         .width('100%')
-        .margin({ top: 16 })
     }
-    .padding(24)
+    .padding(20)
     .width('100%')
     .height('100%')
     .alignItems(HorizontalAlign.Start)
