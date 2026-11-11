@@ -1,6 +1,6 @@
 # LanRDP
 
-[English](README.en.md) | 简体中文 | [更新日志 / Changelog](CHANGELOG.md) | [已知问题 / Known issues](KNOWN_ISSUES.md)
+[English](README.en.md) | 简体中文 | [更新日志 / Changelog](CHANGELOG.md) | [已知问题 / Known issues](KNOWN_ISSUES.md) | [隐私 / Privacy](PRIVACY.md)
 
 一个局域网 RDP 的 macOS 小工具，底层使用 **FreeRDP 3.33.0** 的 `sdl-freerdp`。
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
@@ -46,7 +46,7 @@
 
 ## 1.12 更新
 
-- 钥匙串条目增加可读标签，例如 `LanRDP: P410`、`LanRDP: T450S`。
+- 钥匙串条目增加可读标签，例如 `LanRDP: Office-PC`、`LanRDP: Laptop`。
 - 设置页增加“打开钥匙串访问”按钮。
 
 ## 1.11 更新
@@ -59,7 +59,7 @@
 ## 1.10 更新
 
 - PC 增加“管理员会话（/admin）”开关，等价于 `mstsc /admin`。
-- 适用于安装了 RDS 角色但没有可用 CAL 的服务器，例如 HNK-SV-MES103。
+- 适用于安装了 RDS 角色但没有可用 CAL 的服务器，例如某些 RDS 服务器。
 - 需要登录账户具备管理员权限。
 
 ## 1.9 更新
@@ -70,7 +70,7 @@
 
 ## 1.8 更新
 
-- 增加 RDP 许可/传输阶段失败的检测，HNK-SV-MES103 这类“连接后立刻关闭、没有弹窗”的情况现在会提示。
+- 增加 RDP 许可/传输阶段失败的检测，服务器“连接后立刻关闭、没有弹窗”的情况现在会提示。
 - 失败弹窗不再依赖进程退出码，即使 FreeRDP 以 0 退出，只要日志里有明确失败也会提示。
 
 ## 1.7 更新

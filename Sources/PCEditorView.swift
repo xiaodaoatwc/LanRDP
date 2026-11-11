@@ -51,7 +51,7 @@ struct PCEditorView: View {
             Form {
                 Section("常规") {
                     TextField("名称", text: $draft.name, prompt: Text("例如：办公室电脑"))
-                    TextField("主机名或 IP", text: $draft.host, prompt: Text("192.168.1.10"))
+                    TextField("主机名或 IP", text: $draft.host, prompt: Text("192.0.2.10"))
                     TextField("端口", value: $draft.port, format: .number)
 
                     Picker("分组", selection: $draft.groupID) {

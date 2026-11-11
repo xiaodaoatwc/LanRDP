@@ -11,7 +11,7 @@ LanRDP 的主要变更记录在这里。
 - 自动档在连接前探测 RTT、抖动和路径类型；VPN/公网最高使用平衡，不确定时回退平衡。
 - 手动选择后按手动档位连接；新建 PC 默认自动。
 - 高质量：`/network:lan`、32bpp；平衡：`/network:auto`、24bpp；省流量：`/network:wan`、16bpp、NSC、关闭壁纸/主题/菜单动画。
-- 修复窗口模式连接时指定分辨率被可见桌面大小覆盖的问题（HNK-SV001-5.100）。
+- 修复窗口模式连接时指定分辨率被可见桌面大小覆盖的问题。
 - 画质档在部分服务器上看不出差异，记录在 `KNOWN_ISSUES.md`。
 - 左侧新增“最常访问”，按累计访问次数排序，可在设置中隐藏。
 - 未分组 PC 自动归入“未分组”虚拟分组。
@@ -24,7 +24,7 @@ LanRDP 的主要变更记录在这里。
 - Auto probes RTT, jitter, and path type before connecting; VPN/public connections are capped at Balanced, with Balanced as the fallback.
 - Manual selections are remembered per PC; new PCs default to Auto.
 - High: `/network:lan`, 32bpp; Balanced: `/network:auto`, 24bpp; Data saver: `/network:wan`, 16bpp, NSC, wallpaper/themes/menu animations disabled.
-- Fixed the specified resolution being replaced by the visible desktop size in windowed mode (HNK-SV001-5.100).
+- Fixed the specified resolution being replaced by the visible desktop size in windowed mode.
 - Quality presets may look identical on some servers; documented in `KNOWN_ISSUES.md`.
 - Added “Most visited” in the sidebar, sorted by total connection count; can be hidden in Settings.
 - Ungrouped PCs are collected under the virtual “Ungrouped” group.
@@ -51,13 +51,13 @@ LanRDP 的主要变更记录在这里。
 
 ### 中文
 
-- 钥匙串条目标签改为可读名称，例如 `LanRDP: P410`、`LanRDP: T450S`。
+- 钥匙串条目标签改为可读名称，例如 `LanRDP: Office-PC`、`LanRDP: Laptop`。
 - 钥匙串描述区分共享凭据和单机密码。
 - 设置页新增“打开钥匙串访问”。
 
 ### English
 
-- Keychain items now have readable labels, such as `LanRDP: P410` and `LanRDP: T450S`.
+- Keychain items now have readable labels, such as `LanRDP: Office-PC` and `LanRDP: Laptop`.
 - Keychain descriptions distinguish shared credentials from per-PC passwords.
 - Added “Open Keychain Access” to Settings.
 

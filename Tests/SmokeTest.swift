@@ -5,7 +5,7 @@ struct SmokeTest {
     static func main() async {
         var failures: [String] = []
 
-        var pc = PC(name: "Office", host: "192.168.1.10", port: 3389)
+        var pc = PC(name: "Office", host: "192.0.2.10", port: 3389)
         pc.displayMode = .fitWindow
         pc.width = 1600
         pc.height = 1000
@@ -13,9 +13,9 @@ struct SmokeTest {
         pc.clipboard = true
         pc.audio = false
         pc.shareFolder = true
-        pc.folderPath = "/Users/linc/Downloads"
+        pc.folderPath = "/Users/example/Downloads"
         pc.certificatePolicy = .ignore
-        let credential = Credential(name: "Office", username: "linc", domain: "DESKTOP-ABC")
+        let credential = Credential(name: "Office", username: "testuser", domain: "DESKTOP-ABC")
         let args = RDPLauncher.buildArguments(pc: pc, username: credential.username, domain: credential.domain)
 
         func expect(_ condition: Bool, _ message: String) {
@@ -27,8 +27,8 @@ struct SmokeTest {
             }
         }
 
-        expect(args.contains("/v:192.168.1.10:3389"), "server argument")
-        expect(args.contains("/u:linc"), "username argument")
+        expect(args.contains("/v:192.0.2.10:3389"), "server argument")
+        expect(args.contains("/u:testuser"), "username argument")
         expect(args.contains("/d:DESKTOP-ABC"), "domain argument")
         expect(args.contains("/from-stdin:force"), "password via stdin")
         expect(args.contains("/cert:ignore"), "certificate policy")
@@ -36,21 +36,21 @@ struct SmokeTest {
         expect(args.contains("/scale-desktop:200"), "retina scaling")
         var pc100 = pc
         pc100.scaling = 100
-        let args100 = RDPLauncher.buildArguments(pc: pc100, username: "linc", domain: "")
+        let args100 = RDPLauncher.buildArguments(pc: pc100, username: "testuser", domain: "")
         expect(args100.contains("/scale:100"), "explicit 100% DPI")
 
         expect(pc.qualityPreset == .auto, "new PCs default to auto quality")
-        let highArgs = RDPLauncher.buildArguments(pc: pc, username: "linc", domain: "", quality: .high)
+        let highArgs = RDPLauncher.buildArguments(pc: pc, username: "testuser", domain: "", quality: .high)
         expect(highArgs.contains("/network:lan"), "high quality uses LAN network")
         expect(highArgs.contains("/bpp:32"), "high quality uses 32 bpp")
-        let balancedArgs = RDPLauncher.buildArguments(pc: pc, username: "linc", domain: "", quality: .balanced)
+        let balancedArgs = RDPLauncher.buildArguments(pc: pc, username: "testuser", domain: "", quality: .balanced)
         expect(balancedArgs.contains("/network:auto"), "balanced quality uses auto network")
         expect(balancedArgs.contains("/bpp:24"), "balanced quality uses 24 bpp")
-        let saverArgs = RDPLauncher.buildArguments(pc: pc, username: "linc", domain: "", quality: .saver)
+        let saverArgs = RDPLauncher.buildArguments(pc: pc, username: "testuser", domain: "", quality: .saver)
         expect(saverArgs.contains("/network:wan"), "saver uses WAN network")
         expect(saverArgs.contains("/bpp:16"), "saver uses 16 bpp")
         expect(saverArgs.contains("+nsc"), "saver enables NSC")
-        expect(args.contains("/drive:MacShare,/Users/linc/Downloads"), "folder sharing")
+        expect(args.contains("/drive:MacShare,/Users/example/Downloads"), "folder sharing")
         expect(args.contains("-sound"), "audio disabled")
         expect(args.contains("-sdl-connection-dialog"), "SDL connection dialog disabled")
         expect(!args.contains(where: { $0.hasPrefix("/p:") }), "password not in argv")
@@ -64,7 +64,7 @@ struct SmokeTest {
 
         var pc150 = pc
         pc150.scaling = 150
-        let args150 = RDPLauncher.buildArguments(pc: pc150, username: "linc", domain: "")
+        let args150 = RDPLauncher.buildArguments(pc: pc150, username: "testuser", domain: "")
         expect(args150.contains("/scale-desktop:150"), "150% desktop scaling")
         expect(args150.contains("/scale-device:140"), "150% nearest device scaling")
 
@@ -86,16 +86,17 @@ struct SmokeTest {
         expect(permissions == 0o600, "password vault permissions are 0600")
 
         let store = await MainActor.run { Store(baseDirectory: temp) }
-        let binary = "/Users/linc/Documents/deepseek-harness/default-workspace/lanrdp/.build/build/freerdp-sdl/client/SDL/SDL3/sdl-freerdp"
+        let binary = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/build/freerdp-sdl/client/SDL/SDL3/sdl-freerdp").path
 
         let mostVisited = await MainActor.run { () -> [String] in
-            var frequent = PC(name: "Frequent", host: "192.168.1.20")
+            var frequent = PC(name: "Frequent", host: "192.0.2.20")
             frequent.visitCount = 7
             frequent.lastConnected = Date()
-            var recent = PC(name: "Recent", host: "192.168.1.21")
+            var recent = PC(name: "Recent", host: "192.0.2.21")
             recent.visitCount = 3
             recent.lastConnected = Date()
-            let never = PC(name: "Never", host: "192.168.1.22")
+            let never = PC(name: "Never", host: "192.0.2.22")
             store.addPC(frequent)
             store.addPC(recent)
             store.addPC(never)
@@ -108,7 +109,7 @@ struct SmokeTest {
 
         let movedGroupID = await MainActor.run { () -> UUID? in
             guard let group = store.addGroup(named: "Drag target") else { return nil }
-            let movable = PC(name: "Movable", host: "192.168.1.30")
+            let movable = PC(name: "Movable", host: "192.0.2.30")
             store.addPC(movable)
             store.movePC(movable, to: group.id)
             let grouped = store.pcs.first(where: { $0.id == movable.id })?.groupID == group.id
@@ -119,7 +120,7 @@ struct SmokeTest {
         expect(movedGroupID != nil, "PC can be moved to a group and back to ungrouped")
 
         let directPending = await MainActor.run { () -> PasswordPrompt? in
-            let direct = PC(name: "Direct", host: "192.168.1.11")
+            let direct = PC(name: "Direct", host: "192.0.2.11")
             store.addPC(direct)
             store.connect(direct)
             return store.pendingPassword
@@ -175,7 +176,7 @@ struct SmokeTest {
 
         let licenseState = await MainActor.run { () -> (Bool, AppAlert) in
             let log = "ERROR rdp_client_connect_license: license connection sequence aborted. ERRCONNECT_CONNECT_TRANSPORT_FAILED"
-            return (store.looksLikeFailure(log), store.failureAlert(displayName: "HNK-SV-MES103", port: 3389, log: log))
+            return (store.looksLikeFailure(log), store.failureAlert(displayName: "Example-PC", port: 3389, log: log))
         }
         expect(licenseState.0, "license/transport failure is detected")
         expect(licenseState.1.message.contains("许可"), "license failure has a specific short message")

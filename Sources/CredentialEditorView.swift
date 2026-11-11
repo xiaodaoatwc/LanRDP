@@ -45,7 +45,7 @@ struct CredentialEditorView: View {
             Form {
                 Section("登录信息") {
                     TextField("名称", text: $draft.name, prompt: Text("例如：办公室账户"))
-                    TextField("用户名", text: $draft.username, prompt: Text("linc"))
+                    TextField("用户名", text: $draft.username, prompt: Text("user"))
                     TextField("域（可选）", text: $draft.domain, prompt: Text("DESKTOP-ABC"))
                     SecureField("密码", text: $password, prompt: Text(LocalizedStringKey(isNew ? "可留空，连接时询问" : "留空则保留原密码")))
                 }

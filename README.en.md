@@ -1,6 +1,6 @@
 # LanRDP
 
-[简体中文](README.md) | English | [Changelog](CHANGELOG.md) | [Known issues](KNOWN_ISSUES.md)
+[简体中文](README.md) | English | [Changelog](CHANGELOG.md) | [Known issues](KNOWN_ISSUES.md) | [Privacy](PRIVACY.md)
 
 A small RDP client for macOS, built on **FreeRDP 3.33.0** (`sdl-freerdp`).
 It does not require a Microsoft account and has no internet health check.
