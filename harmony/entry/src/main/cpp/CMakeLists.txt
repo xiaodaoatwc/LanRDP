@@ -36,3 +36,10 @@ target_link_libraries(lanrdp PUBLIC
     z
     dl
 )
+
+if(EXISTS "${OPENSSL_PREFIX}/lib/ossl-modules/legacy.so")
+    add_custom_command(TARGET lanrdp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${OPENSSL_PREFIX}/lib/ossl-modules/legacy.so"
+            "$<TARGET_FILE_DIR:lanrdp>/legacy.so")
+endif()

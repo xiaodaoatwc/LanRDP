@@ -19,6 +19,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cstdlib>
 
 #include <string>
 
@@ -239,6 +240,12 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
 {
     if (!ProbeTcp(host, port, error))
         return false;
+
+#if defined(__aarch64__)
+    setenv("OPENSSL_MODULES", "/data/storage/el1/bundle/libs/arm64", 1);
+#else
+    setenv("OPENSSL_MODULES", "/data/storage/el1/bundle/libs/x86_64", 1);
+#endif
 
     freerdp* instance = freerdp_new();
     if (!instance) {
