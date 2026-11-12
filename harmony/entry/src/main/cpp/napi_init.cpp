@@ -428,17 +428,19 @@ static napi_value SendMouse(napi_env env, napi_callback_info info)
     bool sent = false;
     if (g_session && g_session->context && g_session->context->input) {
         rdpInput* input = g_session->context->input;
-        UINT16 flags = PTR_FLAGS_MOVE;
-        if (down)
-            flags |= PTR_FLAGS_DOWN;
-        switch (button) {
-            case 2: flags |= PTR_FLAGS_BUTTON2; break;
-            case 3: flags |= PTR_FLAGS_BUTTON3; break;
-            case 1:
-            default: flags |= PTR_FLAGS_BUTTON1; break;
-        }
-        if (!down && button == 0)
+        UINT16 flags = 0;
+        if (button <= 0) {
             flags = PTR_FLAGS_MOVE;
+        } else {
+            switch (button) {
+                case 2: flags = PTR_FLAGS_BUTTON2; break;
+                case 3: flags = PTR_FLAGS_BUTTON3; break;
+                case 1:
+                default: flags = PTR_FLAGS_BUTTON1; break;
+            }
+            if (down)
+                flags |= PTR_FLAGS_DOWN;
+        }
 
         const int width = g_session->width > 0 ? g_session->width : 1024;
         const int height = g_session->height > 0 ? g_session->height : 768;
