@@ -448,6 +448,9 @@ static napi_value SendMouse(napi_env env, napi_callback_info info)
         if (y < 0) y = 0;
         if (x >= width) x = width - 1;
         if (y >= height) y = height - 1;
+        if (button > 0 && down)
+            freerdp_input_send_mouse_event(input, PTR_FLAGS_MOVE, static_cast<UINT16>(x),
+                                           static_cast<UINT16>(y));
         sent = freerdp_input_send_mouse_event(input, flags, static_cast<UINT16>(x),
                                               static_cast<UINT16>(y));
     }
@@ -507,6 +510,35 @@ static napi_value SendUnicode(napi_env env, napi_callback_info info)
     return result;
 }
 
+
+static napi_value SendKey(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t code = 0;
+    bool down = false;
+    bool extended = false;
+    if (argc >= 3) {
+        napi_get_value_int32(env, args[0], &code);
+        napi_get_value_bool(env, args[1], &down);
+        napi_get_value_bool(env, args[2], &extended);
+    }
+
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    bool sent = false;
+    if (g_session && g_session->context && g_session->context->input) {
+        UINT16 flags = down ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE;
+        if (extended)
+            flags |= KBD_FLAGS_EXTENDED;
+        sent = freerdp_input_send_keyboard_event(g_session->context->input, flags,
+                                                 static_cast<UINT8>(code));
+    }
+    napi_value result;
+    napi_get_boolean(env, sent, &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -519,7 +551,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

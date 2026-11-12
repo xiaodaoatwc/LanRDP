@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { connect, freerdpVersion, getFrame, sendMouse, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+import { connect, freerdpVersion, getFrame, sendKey, sendMouse, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 @Entry
 @Component
@@ -27,6 +27,7 @@ struct Index {
   private lastTouchX: number = 0;
   private lastTouchY: number = 0;
   private lastWheelY: number = -1;
+  private lastPanOffsetY: number = 0;
 
   aboutToDisappear(): void {
     this.stopFrameTimer();
@@ -211,6 +212,33 @@ struct Index {
     sendMouse(remoteX, remoteY, button ?? this.mouseButton, down);
   }
 
+  private tapKey(code: number, extended: boolean = false): void {
+    sendKey(code, true, extended);
+    sendKey(code, false, extended);
+  }
+
+  private handleHardwareKey(event: KeyEvent): void {
+    if (event.type !== KeyType.Down) {
+      return;
+    }
+    switch (event.keyCode) {
+      case 2054: this.tapKey(0x1C); return;
+      case 2055: this.tapKey(0x0E); return;
+      case 2070: this.tapKey(0x01); return;
+      case 2049: this.tapKey(0x0F); return;
+      case 2017: this.tapKey(0x48, true); return;
+      case 2018: this.tapKey(0x50, true); return;
+      case 2019: this.tapKey(0x4B, true); return;
+      case 2020: this.tapKey(0x4D, true); return;
+      default: break;
+    }
+    const text = event.keyText;
+    if (text.length === 1) {
+      sendUnicode(text.charCodeAt(0), true);
+      sendUnicode(text.charCodeAt(0), false);
+    }
+  }
+
   private sendKeyboard(): void {
     const text = this.keyboardText;
     if (text.length === 0) {
@@ -322,6 +350,29 @@ struct Index {
           .onTouch((event: TouchEvent) => {
             this.handleTouch(event);
           })
+          .gesture(
+            GestureGroup(GestureMode.Parallel,
+              TapGesture({ count: 1, fingers: 2 })
+                .onAction((event: GestureEvent) => {
+                  if (event.fingerList.length > 0) {
+                    const finger = event.fingerList[0];
+                    this.sendMouseAt(finger.localX, finger.localY, true, 2);
+                    this.sendMouseAt(finger.localX, finger.localY, false, 2);
+                  }
+                }),
+              PanGesture({ fingers: 2, direction: PanDirection.Vertical, distance: 4 })
+                .onActionStart(() => {
+                  this.lastPanOffsetY = 0;
+                })
+                .onActionUpdate((event: GestureEvent) => {
+                  const delta = event.offsetY - this.lastPanOffsetY;
+                  if (Math.abs(delta) >= 10) {
+                    sendWheel(delta > 0 ? -120 : 120);
+                    this.lastPanOffsetY = event.offsetY;
+                  }
+                })
+            )
+          )
       } else {
         Column() {
           Text('等待远程画面…')
@@ -347,6 +398,28 @@ struct Index {
           })
       }
       .width('100%')
+
+      Row({ space: 8 }) {
+        Button('Enter').onClick(() => {
+          this.tapKey(0x1C);
+        })
+        Button('Backspace').onClick(() => {
+          this.tapKey(0x0E);
+        })
+        Button('Esc').onClick(() => {
+          this.tapKey(0x01);
+        })
+        Button('Tab').onClick(() => {
+          this.tapKey(0x0F);
+        })
+      }
+      .width('100%')
+
+      TextInput({ placeholder: '电脑键盘输入（点此聚焦）' })
+        .onKeyEvent((event: KeyEvent) => {
+          this.handleHardwareKey(event);
+        })
+        .width('100%')
 
       Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
         .fontSize(11)
