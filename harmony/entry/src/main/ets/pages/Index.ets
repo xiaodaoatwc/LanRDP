@@ -350,6 +350,12 @@ struct Index {
           .onTouch((event: TouchEvent) => {
             this.handleTouch(event);
           })
+          .onAxisEvent((event: AxisEvent) => {
+            const vertical = event.getVerticalAxisValue();
+            if (vertical !== 0) {
+              sendWheel(vertical > 0 ? -120 : 120);
+            }
+          })
           .gesture(
             GestureGroup(GestureMode.Parallel,
               TapGesture({ count: 1, fingers: 2 })
