@@ -99,34 +99,15 @@ static BOOL SessionEndPaint(rdpContext* context)
     if (stride < static_cast<UINT32>(width * 4))
         return TRUE;
 
+    const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
     session->pixels.resize(static_cast<size_t>(width) * height * 4);
-    const BYTE* source = gdi->primary_buffer;
-    BYTE* target = session->pixels.data();
-
-    for (int y = 0; y < height; ++y) {
-        const BYTE* row = source + static_cast<size_t>(y) * stride;
-        for (int x = 0; x < width; ++x) {
-            const BYTE* pixel = row + x * 4;
-            BYTE* out = target + (static_cast<size_t>(y) * width + x) * 4;
-            if (format == PIXEL_FORMAT_RGBA32) {
-                out[0] = pixel[0];
-                out[1] = pixel[1];
-                out[2] = pixel[2];
-                out[3] = 255;
-            } else if (format == PIXEL_FORMAT_BGRA32 || format == PIXEL_FORMAT_BGRX32) {
-                out[0] = pixel[2];
-                out[1] = pixel[1];
-                out[2] = pixel[0];
-                out[3] = 255;
-            } else {
-                out[0] = pixel[2];
-                out[1] = pixel[1];
-                out[2] = pixel[0];
-                out[3] = 255;
-            }
-        }
-    }
+    const BOOL converted = freerdp_image_copy(
+        session->pixels.data(), PIXEL_FORMAT_RGBA32, static_cast<UINT32>(width * 4),
+        0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+        source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+    if (!converted)
+        return TRUE;
 
     session->width = width;
     session->height = height;
