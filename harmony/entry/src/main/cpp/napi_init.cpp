@@ -455,6 +455,56 @@ static napi_value SendMouse(napi_env env, napi_callback_info info)
     return result;
 }
 
+
+static napi_value SendWheel(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t delta = 120;
+    if (argc >= 1)
+        napi_get_value_int32(env, args[0], &delta);
+
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    bool sent = false;
+    if (g_session && g_session->context && g_session->context->input) {
+        UINT16 flags = PTR_FLAGS_WHEEL;
+        if (delta < 0)
+            flags |= PTR_FLAGS_WHEEL_NEGATIVE;
+        const int magnitude = delta < 0 ? -delta : delta;
+        flags |= static_cast<UINT16>(magnitude > 0xFF ? 0xFF : magnitude);
+        sent = freerdp_input_send_mouse_event(g_session->context->input, flags, 0, 0);
+    }
+    napi_value result;
+    napi_get_boolean(env, sent, &result);
+    return result;
+}
+
+static napi_value SendUnicode(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t code = 0;
+    bool down = false;
+    if (argc >= 2) {
+        napi_get_value_int32(env, args[0], &code);
+        napi_get_value_bool(env, args[1], &down);
+    }
+
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    bool sent = false;
+    if (g_session && g_session->context && g_session->context->input) {
+        sent = freerdp_input_send_unicode_keyboard_event(
+            g_session->context->input,
+            down ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE,
+            static_cast<UINT16>(code));
+    }
+    napi_value result;
+    napi_get_boolean(env, sent, &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -465,7 +515,9 @@ static napi_value Init(napi_env env, napi_value exports)
         { "connect", nullptr, Connect, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "stopSession", nullptr, StopSession, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

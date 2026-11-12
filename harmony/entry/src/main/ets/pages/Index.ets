@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { connect, freerdpVersion, getFrame, sendMouse, stopSession, version } from 'liblanrdp.so';
+import { connect, freerdpVersion, getFrame, sendMouse, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 @Entry
 @Component
@@ -17,6 +17,8 @@ struct Index {
   @State private frameHeight: number = 0;
   @State private imageViewWidth: number = 0;
   @State private imageViewHeight: number = 0;
+  @State private mouseButton: number = 1;
+  @State private keyboardText: string = '';
   private mouseDown: boolean = false;
   private timer: number = -1;
 
@@ -137,7 +139,20 @@ struct Index {
     }
     const remoteX = Math.floor((x - left) / scale);
     const remoteY = Math.floor((y - top) / scale);
-    sendMouse(remoteX, remoteY, 1, down);
+    sendMouse(remoteX, remoteY, this.mouseButton, down);
+  }
+
+  private sendKeyboard(): void {
+    const text = this.keyboardText;
+    if (text.length === 0) {
+      return;
+    }
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      sendUnicode(code, true);
+      sendUnicode(code, false);
+    }
+    this.keyboardText = '';
   }
 
   build() {
@@ -200,6 +215,30 @@ struct Index {
         .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
         .width('100%')
 
+      Row({ space: 8 }) {
+        Button('左键')
+          .onClick(() => {
+            this.mouseButton = 1;
+          })
+        Button('右键')
+          .onClick(() => {
+            this.mouseButton = 2;
+          })
+        Button('中键')
+          .onClick(() => {
+            this.mouseButton = 3;
+          })
+        Button('滚轮↑')
+          .onClick(() => {
+            sendWheel(120);
+          })
+        Button('滚轮↓')
+          .onClick(() => {
+            sendWheel(-120);
+          })
+      }
+      .width('100%')
+
       if (this.frameImage !== null) {
         Image(this.frameImage)
           .width('100%')
@@ -226,6 +265,19 @@ struct Index {
         .backgroundColor('#EEF1F6')
         .borderRadius(8)
       }
+
+      Row({ space: 8 }) {
+        TextInput({ placeholder: '键盘输入', text: this.keyboardText })
+          .onChange((value: string) => {
+            this.keyboardText = value;
+          })
+          .layoutWeight(1)
+        Button('发送')
+          .onClick(() => {
+            this.sendKeyboard();
+          })
+      }
+      .width('100%')
 
       Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
         .fontSize(11)
