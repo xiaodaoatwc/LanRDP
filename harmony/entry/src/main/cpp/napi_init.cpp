@@ -539,6 +539,45 @@ static napi_value SendKey(napi_env env, napi_callback_info info)
     return result;
 }
 
+
+static napi_value SendMouseMove(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t button = 0;
+    if (argc >= 3) {
+        napi_get_value_int32(env, args[0], &x);
+        napi_get_value_int32(env, args[1], &y);
+        napi_get_value_int32(env, args[2], &button);
+    }
+
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    bool sent = false;
+    if (g_session && g_session->context && g_session->context->input) {
+        UINT16 flags = PTR_FLAGS_MOVE;
+        switch (button) {
+            case 2: flags |= PTR_FLAGS_BUTTON2; break;
+            case 3: flags |= PTR_FLAGS_BUTTON3; break;
+            case 1: flags |= PTR_FLAGS_BUTTON1; break;
+            default: break;
+        }
+        const int width = g_session->width > 0 ? g_session->width : 1024;
+        const int height = g_session->height > 0 ? g_session->height : 768;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x >= width) x = width - 1;
+        if (y >= height) y = height - 1;
+        sent = freerdp_input_send_mouse_event(g_session->context->input, flags,
+                                              static_cast<UINT16>(x), static_cast<UINT16>(y));
+    }
+    napi_value result;
+    napi_get_boolean(env, sent, &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -552,7 +591,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendMouseMove", nullptr, SendMouseMove, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

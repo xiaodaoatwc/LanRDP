@@ -14,3 +14,4 @@ export const sendMouse: (x: number, y: number, button: number, down: boolean) =>
 export const sendWheel: (delta: number) => boolean;
 export const sendUnicode: (code: number, down: boolean) => boolean;
 export const sendKey: (code: number, down: boolean, extended: boolean) => boolean;
+export const sendMouseMove: (x: number, y: number, button: number) => boolean;

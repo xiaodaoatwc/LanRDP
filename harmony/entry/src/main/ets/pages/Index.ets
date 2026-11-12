@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { connect, freerdpVersion, getFrame, sendKey, sendMouse, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+import { connect, freerdpVersion, getFrame, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 @Entry
 @Component
@@ -181,7 +181,7 @@ struct Index {
         this.cancelLongPress();
       }
       if (!this.longPressTriggered) {
-        this.sendMouseAt(touch.x, touch.y, true);
+        this.sendMouseMoveAt(touch.x, touch.y, this.mouseButton);
       }
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
@@ -237,6 +237,24 @@ struct Index {
       sendUnicode(text.charCodeAt(0), true);
       sendUnicode(text.charCodeAt(0), false);
     }
+  }
+
+  private sendMouseMoveAt(x: number, y: number, button?: number): void {
+    if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
+        this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
+      return;
+    }
+    const scale = Math.min(this.imageViewWidth / this.frameWidth, this.imageViewHeight / this.frameHeight);
+    const drawWidth = this.frameWidth * scale;
+    const drawHeight = this.frameHeight * scale;
+    const left = (this.imageViewWidth - drawWidth) / 2;
+    const top = (this.imageViewHeight - drawHeight) / 2;
+    if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
+      return;
+    }
+    const remoteX = Math.floor((x - left) / scale);
+    const remoteY = Math.floor((y - top) / scale);
+    sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
   private sendKeyboard(): void {
