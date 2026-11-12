@@ -109,6 +109,12 @@ static BOOL SessionEndPaint(rdpContext* context)
     if (!converted)
         return TRUE;
 
+    /* OHOS PixelMap RGBA_8888 expects R,G,B,A while the FreeRDP
+     * compatibility path on this platform produces B,G,R,A. */
+    for (size_t i = 0; i + 3 < session->pixels.size(); i += 4) {
+        std::swap(session->pixels[i], session->pixels[i + 2]);
+    }
+
     session->width = width;
     session->height = height;
     ++session->version;
