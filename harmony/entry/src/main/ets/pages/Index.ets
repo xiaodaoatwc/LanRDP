@@ -21,10 +21,23 @@ struct Index {
   @State private keyboardText: string = '';
   private mouseDown: boolean = false;
   private timer: number = -1;
+  private longPressTimer: number = -1;
+  private longPressTriggered: boolean = false;
+  private touchMoved: boolean = false;
+  private lastTouchX: number = 0;
+  private lastTouchY: number = 0;
+  private lastWheelY: number = -1;
 
   aboutToDisappear(): void {
     this.stopFrameTimer();
     stopSession();
+  }
+
+  private cancelLongPress(): void {
+    if (this.longPressTimer >= 0) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = -1;
+    }
   }
 
   private stopFrameTimer(): void {
@@ -110,21 +123,77 @@ struct Index {
 
   private handleTouch(event: TouchEvent): void {
     if (event.touches.length === 0) {
+      this.cancelLongPress();
+      if (this.mouseDown && !this.longPressTriggered) {
+        this.sendMouseAt(this.lastTouchX, this.lastTouchY, false);
+      }
+      this.mouseDown = false;
+      this.longPressTriggered = false;
+      this.lastWheelY = -1;
       return;
     }
+
     const touch = event.touches[0];
+    const previousX = this.lastTouchX;
+    const previousY = this.lastTouchY;
+    this.lastTouchX = touch.x;
+    this.lastTouchY = touch.y;
+
+    if (event.touches.length >= 2) {
+      this.cancelLongPress();
+      if (this.mouseDown) {
+        this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
+        this.mouseDown = false;
+      }
+      const second = event.touches[1];
+      const averageY = (touch.y + second.y) / 2;
+      if (this.lastWheelY >= 0 && Math.abs(averageY - this.lastWheelY) >= 12) {
+        sendWheel(averageY < this.lastWheelY ? 120 : -120);
+        this.lastWheelY = averageY;
+      } else if (this.lastWheelY < 0) {
+        this.lastWheelY = averageY;
+      }
+      return;
+    }
+
     if (event.type === TouchType.Down) {
+      this.lastWheelY = -1;
       this.mouseDown = true;
+      this.touchMoved = false;
+      this.longPressTriggered = false;
       this.sendMouseAt(touch.x, touch.y, true);
+
+      this.cancelLongPress();
+      this.longPressTimer = setTimeout(() => {
+        if (this.mouseDown && !this.touchMoved && !this.longPressTriggered) {
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, true, 2);
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 2);
+          this.longPressTriggered = true;
+        }
+      }, 550);
     } else if (event.type === TouchType.Move && this.mouseDown) {
-      this.sendMouseAt(touch.x, touch.y, true);
+      if (Math.abs(touch.x - previousX) > 6 || Math.abs(touch.y - previousY) > 6) {
+        this.touchMoved = true;
+      }
+      if (this.touchMoved) {
+        this.cancelLongPress();
+      }
+      if (!this.longPressTriggered) {
+        this.sendMouseAt(touch.x, touch.y, true);
+      }
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      this.cancelLongPress();
+      if (!this.longPressTriggered) {
+        this.sendMouseAt(touch.x, touch.y, false);
+      }
       this.mouseDown = false;
-      this.sendMouseAt(touch.x, touch.y, false);
+      this.longPressTriggered = false;
+      this.lastWheelY = -1;
     }
   }
 
-  private sendMouseAt(x: number, y: number, down: boolean): void {
+  private sendMouseAt(x: number, y: number, down: boolean, button?: number): void {
     if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
         this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
       return;
@@ -139,7 +208,7 @@ struct Index {
     }
     const remoteX = Math.floor((x - left) / scale);
     const remoteY = Math.floor((y - top) / scale);
-    sendMouse(remoteX, remoteY, this.mouseButton, down);
+    sendMouse(remoteX, remoteY, button ?? this.mouseButton, down);
   }
 
   private sendKeyboard(): void {
