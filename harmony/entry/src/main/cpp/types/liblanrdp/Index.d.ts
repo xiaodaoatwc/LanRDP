@@ -10,3 +10,4 @@ export interface Frame {
 }
 export const stopSession: () => boolean;
 export const getFrame: () => Frame | null;
+export const sendMouse: (x: number, y: number, button: number, down: boolean) => boolean;

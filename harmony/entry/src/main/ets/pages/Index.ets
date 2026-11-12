@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { connect, freerdpVersion, getFrame, stopSession, version } from 'liblanrdp.so';
+import { connect, freerdpVersion, getFrame, sendMouse, stopSession, version } from 'liblanrdp.so';
 
 @Entry
 @Component
@@ -13,6 +13,11 @@ struct Index {
   @State private isConnecting: boolean = false;
   @State private frameImage: image.PixelMap | null = null;
   @State private frameVersion: number = 0;
+  @State private frameWidth: number = 0;
+  @State private frameHeight: number = 0;
+  @State private imageViewWidth: number = 0;
+  @State private imageViewHeight: number = 0;
+  private mouseDown: boolean = false;
   private timer: number = -1;
 
   aboutToDisappear(): void {
@@ -93,10 +98,46 @@ struct Index {
       this.frameImage?.release();
       this.frameImage = pixelMap;
       this.frameVersion = frame.version;
+      this.frameWidth = frame.width;
+      this.frameHeight = frame.height;
       this.status = `已连接 · ${frame.width}×${frame.height}`;
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
     }
+  }
+
+  private handleTouch(event: TouchEvent): void {
+    if (event.touches.length === 0) {
+      return;
+    }
+    const touch = event.touches[0];
+    if (event.type === TouchType.Down) {
+      this.mouseDown = true;
+      this.sendMouseAt(touch.x, touch.y, true);
+    } else if (event.type === TouchType.Move && this.mouseDown) {
+      this.sendMouseAt(touch.x, touch.y, true);
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      this.mouseDown = false;
+      this.sendMouseAt(touch.x, touch.y, false);
+    }
+  }
+
+  private sendMouseAt(x: number, y: number, down: boolean): void {
+    if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
+        this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
+      return;
+    }
+    const scale = Math.min(this.imageViewWidth / this.frameWidth, this.imageViewHeight / this.frameHeight);
+    const drawWidth = this.frameWidth * scale;
+    const drawHeight = this.frameHeight * scale;
+    const left = (this.imageViewWidth - drawWidth) / 2;
+    const top = (this.imageViewHeight - drawHeight) / 2;
+    if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
+      return;
+    }
+    const remoteX = Math.floor((x - left) / scale);
+    const remoteY = Math.floor((y - top) / scale);
+    sendMouse(remoteX, remoteY, 1, down);
   }
 
   build() {
@@ -166,6 +207,13 @@ struct Index {
           .objectFit(ImageFit.Contain)
           .backgroundColor('#000000')
           .borderRadius(8)
+          .onAreaChange((_oldValue: Area, newValue: Area) => {
+            this.imageViewWidth = Number(newValue.width);
+            this.imageViewHeight = Number(newValue.height);
+          })
+          .onTouch((event: TouchEvent) => {
+            this.handleTouch(event);
+          })
       } else {
         Column() {
           Text('等待远程画面…')

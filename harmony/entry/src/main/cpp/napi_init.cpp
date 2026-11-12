@@ -3,6 +3,7 @@
 #include <freerdp/version.h>
 #include <freerdp/settings.h>
 #include <freerdp/gdi/gdi.h>
+#include <freerdp/input.h>
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
 
@@ -177,7 +178,7 @@ static BOOL SessionPostConnect(freerdp* instance)
 {
     if (!instance || !instance->context)
         return FALSE;
-    if (!gdi_init(instance, PIXEL_FORMAT_BGRX32))
+    if (!gdi_init(instance, PIXEL_FORMAT_RGBA32))
         return FALSE;
     instance->context->update->BeginPaint = SessionBeginPaint;
     instance->context->update->EndPaint = SessionEndPaint;
@@ -418,6 +419,55 @@ static napi_value GetFrame(napi_env env, napi_callback_info info)
     return object;
 }
 
+
+static napi_value SendMouse(napi_env env, napi_callback_info info)
+{
+    size_t argc = 4;
+    napi_value args[4] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t button = 0;
+    bool down = false;
+    if (argc >= 4) {
+        napi_get_value_int32(env, args[0], &x);
+        napi_get_value_int32(env, args[1], &y);
+        napi_get_value_int32(env, args[2], &button);
+        napi_get_value_bool(env, args[3], &down);
+    }
+
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    bool sent = false;
+    if (g_session && g_session->context && g_session->context->input) {
+        rdpInput* input = g_session->context->input;
+        UINT16 flags = PTR_FLAGS_MOVE;
+        if (down)
+            flags |= PTR_FLAGS_DOWN;
+        switch (button) {
+            case 2: flags |= PTR_FLAGS_BUTTON2; break;
+            case 3: flags |= PTR_FLAGS_BUTTON3; break;
+            case 1:
+            default: flags |= PTR_FLAGS_BUTTON1; break;
+        }
+        if (!down && button == 0)
+            flags = PTR_FLAGS_MOVE;
+
+        const int width = g_session->width > 0 ? g_session->width : 1024;
+        const int height = g_session->height > 0 ? g_session->height : 768;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x >= width) x = width - 1;
+        if (y >= height) y = height - 1;
+        sent = freerdp_input_send_mouse_event(input, flags, static_cast<UINT16>(x),
+                                              static_cast<UINT16>(y));
+    }
+
+    napi_value result;
+    napi_get_boolean(env, sent, &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -427,7 +477,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "freerdpVersion", nullptr, FreeRDPVersion, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "connect", nullptr, Connect, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "stopSession", nullptr, StopSession, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
