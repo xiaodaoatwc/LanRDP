@@ -283,10 +283,10 @@ struct Index {
       case 2055: this.tapKey(0x0E); return;
       case 2070: this.tapKey(0x01); return;
       case 2049: this.tapKey(0x0F); return;
-      case 2017: this.tapKey(0x48, true); return;
-      case 2018: this.tapKey(0x50, true); return;
-      case 2019: this.tapKey(0x4B, true); return;
-      case 2020: this.tapKey(0x4D, true); return;
+      case 2012: this.tapKey(0x48, true); return;
+      case 2013: this.tapKey(0x50, true); return;
+      case 2014: this.tapKey(0x4B, true); return;
+      case 2015: this.tapKey(0x4D, true); return;
       default: break;
     }
     const text = event.keyText;
@@ -622,31 +622,9 @@ struct Index {
 
 
         if (this.connected) {
-          Row({ space: 8 }) {
-            TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
-              .onChange((value: string) => {
-                this.keyboardText = value;
-              })
-              .onFocus(() => {
-                this.onInputFocus();
-              })
-              .onBlur(() => {
-                this.onInputBlur();
-              })
-              .layoutWeight(1)
-            Button('发送')
-              .onClick(() => {
-                this.sendKeyboard();
-              })
-            Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
-              .onClick(() => {
-                this.toggleVirtualKeyboard();
-              })
-          }
-          .width('100%')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .backgroundColor('#F7F9FC')
-          .translate({ y: this.keyboardVisible ? -this.virtualKeyboardHeight : 0 })
+          Row()
+            .width('100%')
+            .height(64)
         }
 
         if (!this.connected) {
@@ -662,22 +640,36 @@ struct Index {
       .alignItems(HorizontalAlign.Start)
       .backgroundColor('#F7F9FC')
 
+      if (this.connected) {
+        Row({ space: 8 }) {
+          TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+            .onChange((value: string) => {
+              this.keyboardText = value;
+            })
+            .onFocus(() => {
+              this.onInputFocus();
+            })
+            .onBlur(() => {
+              this.onInputBlur();
+            })
+            .layoutWeight(1)
+          Button('发送')
+            .onClick(() => {
+              this.sendKeyboard();
+            })
+          Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+            .onClick(() => {
+              this.toggleVirtualKeyboard();
+            })
+        }
+        .width('100%')
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .backgroundColor('#F7F9FC')
+        .translate({ y: this.keyboardVisible ? -this.virtualKeyboardHeight : (this.systemKeyboardHeight > 0 ? -px2vp(this.systemKeyboardHeight) + 20 : 0) })
+      }
+
       if (this.connected && this.keyboardVisible) {
         Column({ space: 4 }) {
-          Row() {
-            Text('虚拟键盘')
-              .fontSize(12)
-              .fontColor('#6B7280')
-              .layoutWeight(1)
-            Button('收起')
-              .fontSize(12)
-              .height(30)
-              .onClick(() => {
-                this.toggleVirtualKeyboard();
-              })
-          }
-          .width('100%')
-
           Row({ space: 4 }) {
             this.Key('Esc', 0x01)
             this.Key2('!', '1', 0x02)
