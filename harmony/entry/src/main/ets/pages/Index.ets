@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { connect, freerdpVersion, getFrame, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 interface ComboKey {
@@ -33,7 +33,9 @@ struct Index {
   @State private comboActive: boolean = false;
   @State private inputFocused: boolean = false;
   @State private viewOffsetY: number = 0;
+  @State private systemKeyboardHeight: number = 0;
   private comboKeys: ComboKey[] = [];
+  private appWindow: window.Window | null = null;
   private panLastY: number = 0;
   private panMoved: boolean = false;
   private mouseDown: boolean = false;
@@ -48,9 +50,19 @@ struct Index {
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+    window.getLastWindow(getContext(this)).then((win: window.Window) => {
+      this.appWindow = win;
+      win.on('keyboardHeightChange', (height: number) => {
+        this.systemKeyboardHeight = height;
+      });
+    });
   }
 
   aboutToDisappear(): void {
+    if (this.appWindow !== null) {
+      this.appWindow.off('keyboardHeightChange');
+      this.appWindow = null;
+    }
     this.stopFrameTimer();
     stopSession();
   }
@@ -372,8 +384,10 @@ struct Index {
   @Builder
   Key(label: string, code: number, extended: boolean = false, weight: number = 1) {
     Button(label)
-      .fontSize(12)
+      .fontSize(11)
       .height(38)
+      .padding(0)
+      .constraintSize({ minWidth: 0 })
       .layoutWeight(weight)
       .onClick(() => {
         this.pressKey(code, extended);
@@ -383,8 +397,10 @@ struct Index {
   @Builder
   ModKey(label: string, code: number, active: boolean, extended: boolean = false) {
     Button(label)
-      .fontSize(12)
+      .fontSize(11)
       .height(38)
+      .padding(0)
+      .constraintSize({ minWidth: 0 })
       .layoutWeight(1)
       .backgroundColor(active ? '#2563EB' : '#E5E7EB')
       .fontColor(active ? '#FFFFFF' : '#111827')
@@ -490,6 +506,12 @@ struct Index {
             Text(this.status)
               .fontSize(12)
               .fontColor('#6B7280')
+            Button('直连键盘')
+              .fontSize(12)
+              .onClick(() => {
+                this.getUIContext().getFocusController().clearFocus();
+                this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
+              })
             Button('断开')
               .fontSize(12)
               .onClick(() => {
@@ -498,27 +520,6 @@ struct Index {
           }
           .width('100%')
 
-          Row({ space: 8 }) {
-            TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
-              .onChange((value: string) => {
-                this.keyboardText = value;
-              })
-              .onFocus(() => {
-                this.onInputFocus();
-              })
-              .onBlur(() => {
-                this.onInputBlur();
-              })
-              .layoutWeight(1)
-            Button('发送')
-              .onClick(() => {
-                this.sendKeyboard();
-              })
-            Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
-              .onClick(() => {
-                this.toggleVirtualKeyboard();
-              })
-          }
           .width('100%')
         }
 
@@ -598,6 +599,32 @@ struct Index {
           .borderRadius(8)
         }
 
+        if (this.connected) {
+          Row({ space: 8 }) {
+            TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+              .onChange((value: string) => {
+                this.keyboardText = value;
+              })
+              .onFocus(() => {
+                this.onInputFocus();
+              })
+              .onBlur(() => {
+                this.onInputBlur();
+              })
+              .layoutWeight(1)
+            Button('发送')
+              .onClick(() => {
+                this.sendKeyboard();
+              })
+            Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+              .onClick(() => {
+                this.toggleVirtualKeyboard();
+              })
+          }
+          .width('100%')
+          .translate({ y: -this.systemKeyboardHeight })
+        }
+
         if (!this.connected) {
           Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
             .fontSize(11)
@@ -647,6 +674,7 @@ struct Index {
             this.Key('[', 0x1A)
             this.Key(']', 0x1B)
             this.Key('\\', 0x2B)
+            this.Key('PrtSc', 0x37, true, 2)
           }
           .width('100%')
 
@@ -664,6 +692,7 @@ struct Index {
             this.Key(';', 0x27)
             this.Key("'", 0x28)
             this.Key('Enter', 0x1C, false, 2)
+            this.Key('PgUp', 0x49, true, 2)
           }
           .width('100%')
 
@@ -681,6 +710,7 @@ struct Index {
             this.Key('/', 0x35)
             this.ModKey('Shift', 0x36, this.shiftActive, false)
             this.Key('↑', 0x48, true)
+            this.Key('PgDn', 0x51, true, 2)
           }
           .width('100%')
 
@@ -714,5 +744,11 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor('#F7F9FC')
+    .id('remoteKeyboard')
+    .focusable(true)
+    .defaultFocus(true)
+    .onKeyEvent((event: KeyEvent) => {
+      this.handleHardwareKey(event);
+    })
   }
 }
