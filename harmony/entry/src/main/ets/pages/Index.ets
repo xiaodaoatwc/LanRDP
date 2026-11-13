@@ -39,6 +39,7 @@ struct Index {
   private appWindow: window.Window | null = null;
   private panLastY: number = 0;
   private panMoved: boolean = false;
+  private touchStartTime: number = 0;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -219,6 +220,7 @@ struct Index {
       this.mouseDown = true;
       this.touchMoved = false;
       this.longPressTriggered = false;
+      this.touchStartTime = Date.now();
       this.sendMouseAt(touch.x, touch.y, true);
 
       this.cancelLongPress();
@@ -242,7 +244,12 @@ struct Index {
       }
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
-      if (!this.longPressTriggered) {
+      const held = Date.now() - this.touchStartTime;
+      if (!this.longPressTriggered && held > 550 && !this.touchMoved) {
+        this.sendMouseAt(touch.x, touch.y, false, 1);
+        this.sendMouseAt(touch.x, touch.y, true, 2);
+        this.sendMouseAt(touch.x, touch.y, false, 2);
+      } else if (!this.longPressTriggered) {
         this.sendMouseAt(touch.x, touch.y, false);
       }
       this.mouseDown = false;
@@ -278,40 +285,49 @@ struct Index {
     if (event.type !== KeyType.Down) {
       return;
     }
-    switch (event.keyCode) {
-      case 2054: this.tapKey(0x1C); return;
-      case 2055: this.tapKey(0x0E); return;
-      case 2070: this.tapKey(0x01); return;
-      case 2049: this.tapKey(0x0F); return;
-      case 2012: this.tapKey(0x48, true); return;
-      case 2013: this.tapKey(0x50, true); return;
-      case 2014: this.tapKey(0x4B, true); return;
-      case 2015: this.tapKey(0x4D, true); return;
-      default: break;
+    const code = event.keyCode;
+    if (code === 2054) { this.tapKey(0x1C); return; }
+    if (code === 2055) { this.tapKey(0x0E); return; }
+    if (code === 2070) { this.tapKey(0x01); return; }
+    if (code === 2049) { this.tapKey(0x0F); return; }
+    if (code === 2071) { this.tapKey(0x53, true); return; }
+    if (code === 2012) { this.tapKey(0x48, true); return; }
+    if (code === 2013) { this.tapKey(0x50, true); return; }
+    if (code === 2014) { this.tapKey(0x4B, true); return; }
+    if (code === 2015) { this.tapKey(0x4D, true); return; }
+    if (code === 2050) { this.tapKey(0x39); return; }
+
+    if (code >= 2017 && code <= 2042) {
+      const letters: number[] = [
+        0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17,
+        0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
+        0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C
+      ];
+      this.tapKey(letters[code - 2017]);
+      return;
     }
+    if (code >= 2000 && code <= 2009) {
+      const digits: number[] = [0x0B, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
+      this.tapKey(digits[code - 2000]);
+      return;
+    }
+    if (code === 2043) { this.tapKey(0x33); return; }
+    if (code === 2044) { this.tapKey(0x34); return; }
+    if (code === 2064) { this.tapKey(0x35); return; }
+    if (code === 2057) { this.tapKey(0x0C); return; }
+    if (code === 2058) { this.tapKey(0x0D); return; }
+    if (code === 2059) { this.tapKey(0x1A); return; }
+    if (code === 2060) { this.tapKey(0x1B); return; }
+    if (code === 2061) { this.tapKey(0x2B); return; }
+    if (code === 2062) { this.tapKey(0x27); return; }
+    if (code === 2063) { this.tapKey(0x28); return; }
+    if (code === 2056) { this.tapKey(0x29); return; }
+
     const text = event.keyText;
     if (text.length === 1) {
       sendUnicode(text.charCodeAt(0), true);
       sendUnicode(text.charCodeAt(0), false);
     }
-  }
-
-  private sendMouseMoveAt(x: number, y: number, button?: number): void {
-    if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
-        this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
-      return;
-    }
-    const scale = Math.min(this.imageViewWidth / this.frameWidth, this.imageViewHeight / this.frameHeight);
-    const drawWidth = this.frameWidth * scale;
-    const drawHeight = this.frameHeight * scale;
-    const left = (this.imageViewWidth - drawWidth) / 2;
-    const top = (this.imageViewHeight - drawHeight) / 2;
-    if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
-      return;
-    }
-    const remoteX = Math.floor((x - left) / scale);
-    const remoteY = Math.floor((y - this.viewOffsetY - top) / scale);
-    sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
   private disconnect(): void {
@@ -348,6 +364,24 @@ struct Index {
     this.inputFocused = false;
     this.keyboardVisible = true;
     this.adjustViewForInput();
+  }
+
+  private sendMouseMoveAt(x: number, y: number, button?: number): void {
+    if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
+        this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
+      return;
+    }
+    const scale = Math.min(this.imageViewWidth / this.frameWidth, this.imageViewHeight / this.frameHeight);
+    const drawWidth = this.frameWidth * scale;
+    const drawHeight = this.frameHeight * scale;
+    const left = (this.imageViewWidth - drawWidth) / 2;
+    const top = (this.imageViewHeight - drawHeight) / 2;
+    if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
+      return;
+    }
+    const remoteX = Math.floor((x - left) / scale);
+    const remoteY = Math.floor((y - this.viewOffsetY - top) / scale);
+    sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
   private sendKeyboard(): void {
@@ -665,7 +699,7 @@ struct Index {
         .width('100%')
         .padding({ left: 8, right: 8, top: 4, bottom: 4 })
         .backgroundColor('#F7F9FC')
-        .translate({ y: this.keyboardVisible ? -this.virtualKeyboardHeight : (this.systemKeyboardHeight > 0 ? -px2vp(this.systemKeyboardHeight) + 20 : 0) })
+        .translate({ y: this.keyboardVisible ? -this.virtualKeyboardHeight : (this.systemKeyboardHeight > 0 ? -px2vp(this.systemKeyboardHeight) + 30 : 0) })
       }
 
       if (this.connected && this.keyboardVisible) {
