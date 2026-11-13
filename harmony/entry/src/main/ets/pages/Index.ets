@@ -34,6 +34,7 @@ struct Index {
   @State private inputFocused: boolean = false;
   @State private viewOffsetY: number = 0;
   @State private systemKeyboardHeight: number = 0;
+  @State private virtualKeyboardHeight: number = 0;
   private comboKeys: ComboKey[] = [];
   private appWindow: window.Window | null = null;
   private panLastY: number = 0;
@@ -393,7 +394,7 @@ struct Index {
   Key(label: string, code: number, extended: boolean = false, weight: number = 1) {
     Button(label)
       .fontSize(11)
-      .height(38)
+      .height(56)
       .padding(0)
       .constraintSize({ minWidth: 0 })
       .layoutWeight(weight)
@@ -403,10 +404,32 @@ struct Index {
   }
 
   @Builder
+  Key2(top: string, bottom: string, code: number, extended: boolean = false, weight: number = 1) {
+    Button() {
+      Column({ space: 0 }) {
+        Text(top)
+          .fontSize(9)
+          .fontColor('#E5E7EB')
+        Text(bottom)
+          .fontSize(12)
+          .fontColor('#FFFFFF')
+      }
+      .justifyContent(FlexAlign.Center)
+    }
+    .height(56)
+    .padding(0)
+    .constraintSize({ minWidth: 0 })
+    .layoutWeight(weight)
+    .onClick(() => {
+      this.pressKey(code, extended);
+    })
+  }
+
+  @Builder
   ModKey(label: string, code: number, active: boolean, extended: boolean = false, weight: number = 1) {
     Button(label)
       .fontSize(11)
-      .height(38)
+      .height(56)
       .padding(0)
       .constraintSize({ minWidth: 0 })
       .layoutWeight(weight)
@@ -540,6 +563,21 @@ struct Index {
             .onTouch((event: TouchEvent) => {
               this.handleTouch(event);
             })
+            .onMouse((event: MouseEvent) => {
+              if (event.button === MouseButton.Right) {
+                if (event.action === MouseAction.Press) {
+                  this.sendMouseAt(event.x, event.y, true, 2);
+                } else if (event.action === MouseAction.Release) {
+                  this.sendMouseAt(event.x, event.y, false, 2);
+                }
+              } else if (event.button === MouseButton.Middle) {
+                if (event.action === MouseAction.Press) {
+                  this.sendMouseAt(event.x, event.y, true, 3);
+                } else if (event.action === MouseAction.Release) {
+                  this.sendMouseAt(event.x, event.y, false, 3);
+                }
+              }
+            })
             .onAxisEvent((event: AxisEvent) => {
               const vertical = event.getVerticalAxisValue();
               if (vertical !== 0) {
@@ -583,6 +621,34 @@ struct Index {
         }
 
 
+        if (this.connected) {
+          Row({ space: 8 }) {
+            TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+              .onChange((value: string) => {
+                this.keyboardText = value;
+              })
+              .onFocus(() => {
+                this.onInputFocus();
+              })
+              .onBlur(() => {
+                this.onInputBlur();
+              })
+              .layoutWeight(1)
+            Button('发送')
+              .onClick(() => {
+                this.sendKeyboard();
+              })
+            Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+              .onClick(() => {
+                this.toggleVirtualKeyboard();
+              })
+          }
+          .width('100%')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor('#F7F9FC')
+          .translate({ y: this.keyboardVisible ? -this.virtualKeyboardHeight : 0 })
+        }
+
         if (!this.connected) {
           Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
             .fontSize(11)
@@ -595,34 +661,6 @@ struct Index {
       .height('100%')
       .alignItems(HorizontalAlign.Start)
       .backgroundColor('#F7F9FC')
-
-      if (this.connected) {
-        Row({ space: 8 }) {
-          TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
-            .onChange((value: string) => {
-              this.keyboardText = value;
-            })
-            .onFocus(() => {
-              this.onInputFocus();
-            })
-            .onBlur(() => {
-              this.onInputBlur();
-            })
-            .layoutWeight(1)
-          Button('发送')
-            .onClick(() => {
-              this.sendKeyboard();
-            })
-          Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
-            .onClick(() => {
-              this.toggleVirtualKeyboard();
-            })
-        }
-        .width('100%')
-        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-        .backgroundColor('#F7F9FC')
-        .translate({ y: this.systemKeyboardHeight > 0 ? -px2vp(this.systemKeyboardHeight) + 20 : 0 })
-      }
 
       if (this.connected && this.keyboardVisible) {
         Column({ space: 4 }) {
@@ -642,18 +680,18 @@ struct Index {
 
           Row({ space: 4 }) {
             this.Key('Esc', 0x01)
-            this.Key('1', 0x02)
-            this.Key('2', 0x03)
-            this.Key('3', 0x04)
-            this.Key('4', 0x05)
-            this.Key('5', 0x06)
-            this.Key('6', 0x07)
-            this.Key('7', 0x08)
-            this.Key('8', 0x09)
-            this.Key('9', 0x0A)
-            this.Key('0', 0x0B)
-            this.Key('-', 0x0C)
-            this.Key('=', 0x0D)
+            this.Key2('!', '1', 0x02)
+            this.Key2('@', '2', 0x03)
+            this.Key2('#', '3', 0x04)
+            this.Key2('$', '4', 0x05)
+            this.Key2('%', '5', 0x06)
+            this.Key2('^', '6', 0x07)
+            this.Key2('&', '7', 0x08)
+            this.Key2('*', '8', 0x09)
+            this.Key2('(', '9', 0x0A)
+            this.Key2(')', '0', 0x0B)
+            this.Key2('_', '-', 0x0C)
+            this.Key2('+', '=', 0x0D)
             this.Key('Backspace', 0x0E, false, 2)
             this.Key('Delete', 0x53, true)
           }
@@ -671,15 +709,15 @@ struct Index {
             this.Key('I', 0x17)
             this.Key('O', 0x18)
             this.Key('P', 0x19)
-            this.Key('[', 0x1A)
-            this.Key(']', 0x1B)
-            this.Key('\\', 0x2B)
+            this.Key2('{', '[', 0x1A)
+            this.Key2('}', ']', 0x1B)
+            this.Key2('|', '\\', 0x2B)
             this.Key('PrtSc', 0x37, true)
           }
           .width('100%')
 
           Row({ space: 4 }) {
-            this.Key('Caps', 0x3A, false, 1)
+            this.Key('Caps', 0x3A, false, 1.5)
             this.Key('A', 0x1E)
             this.Key('S', 0x1F)
             this.Key('D', 0x20)
@@ -689,8 +727,8 @@ struct Index {
             this.Key('J', 0x24)
             this.Key('K', 0x25)
             this.Key('L', 0x26)
-            this.Key(';', 0x27)
-            this.Key("'", 0x28)
+            this.Key2(':', ';', 0x27)
+            this.Key2('\"', "'", 0x28)
             this.Key('Enter', 0x1C, false, 2)
             this.Key('PgUp', 0x49, true)
           }
@@ -705,19 +743,19 @@ struct Index {
             this.Key('B', 0x30)
             this.Key('N', 0x31)
             this.Key('M', 0x32)
-            this.Key(',', 0x33)
-            this.Key('.', 0x34)
-            this.Key('/', 0x35)
+            this.Key2('<', ',', 0x33)
+            this.Key2('>', '.', 0x34)
+            this.Key2('?', '/', 0x35)
             this.ModKey('Shift', 0x36, this.shiftActive, false, 2)
             this.Key('↑', 0x48, true)
-            this.Key('PgDn', 0x51, true, 2)
+            this.Key('PgDn', 0x51, true, 1)
           }
           .width('100%')
 
           Row({ space: 4 }) {
             Button(this.comboActive ? '组合键•' : '组合键')
               .fontSize(12)
-              .height(38)
+              .height(56)
               .layoutWeight(2)
               .backgroundColor(this.comboActive ? '#2563EB' : '#E5E7EB')
               .fontColor(this.comboActive ? '#FFFFFF' : '#111827')
@@ -739,7 +777,12 @@ struct Index {
         .width('100%')
         .padding({ left: 8, right: 8, top: 6, bottom: 6 })
         .backgroundColor('#F7F9FC')
+        .onAreaChange((_oldValue: Area, newValue: Area) => {
+          this.virtualKeyboardHeight = Number(newValue.height);
+        })
       }
+
+
     }
     .width('100%')
     .height('100%')
