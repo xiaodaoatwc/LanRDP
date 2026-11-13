@@ -11,6 +11,7 @@ struct Index {
   @State private domain: string = '';
   @State private status: string = `FreeRDP ${freerdpVersion()}`;
   @State private isConnecting: boolean = false;
+  @State private connected: boolean = false;
   @State private frameImage: image.PixelMap | null = null;
   @State private frameVersion: number = 0;
   @State private frameWidth: number = 0;
@@ -77,6 +78,7 @@ struct Index {
         this.domain.trim()
       );
       if (result === 'connected') {
+        this.connected = true;
         this.status = '连接成功，等待画面…';
         this.timer = setInterval(() => {
           this.refreshFrame();
@@ -257,6 +259,18 @@ struct Index {
     sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
+  private disconnect(): void {
+    this.stopFrameTimer();
+    stopSession();
+    this.frameImage?.release();
+    this.frameImage = null;
+    this.frameVersion = 0;
+    this.connected = false;
+    this.mouseDown = false;
+    this.longPressTriggered = false;
+    this.status = '已断开';
+  }
+
   private sendKeyboard(): void {
     const text = this.keyboardText;
     if (text.length === 0) {
@@ -271,64 +285,82 @@ struct Index {
   }
 
   build() {
-    Column({ space: 10 }) {
-      Text('LanRDP')
-        .fontSize(30)
-        .fontWeight(FontWeight.Bold)
-        .width('100%')
+    Column({ space: 8 }) {
+      if (!this.connected) {
+        Text('LanRDP')
+          .fontSize(30)
+          .fontWeight(FontWeight.Bold)
+          .width('100%')
 
-      Text('HarmonyOS NEXT · 远程桌面')
-        .fontSize(13)
-        .fontColor('#6B7280')
-        .width('100%')
+        Text('HarmonyOS NEXT · 远程桌面')
+          .fontSize(13)
+          .fontColor('#6B7280')
+          .width('100%')
 
-      TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
-        .onChange((value: string) => {
-          this.host = value;
-        })
-        .width('100%')
-
-      Row({ space: 10 }) {
-        TextInput({ placeholder: '端口', text: this.portText })
-          .type(InputType.Number)
+        TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
           .onChange((value: string) => {
-            this.portText = value;
+            this.host = value;
           })
-          .layoutWeight(1)
-        TextInput({ placeholder: '用户名', text: this.username })
-          .onChange((value: string) => {
-            this.username = value;
+          .width('100%')
+
+        Row({ space: 10 }) {
+          TextInput({ placeholder: '端口', text: this.portText })
+            .type(InputType.Number)
+            .onChange((value: string) => {
+              this.portText = value;
+            })
+            .layoutWeight(1)
+          TextInput({ placeholder: '用户名', text: this.username })
+            .onChange((value: string) => {
+              this.username = value;
+            })
+            .layoutWeight(2)
+        }
+        .width('100%')
+
+        Row({ space: 10 }) {
+          TextInput({ placeholder: '密码', text: this.password })
+            .type(InputType.Password)
+            .onChange((value: string) => {
+              this.password = value;
+            })
+            .layoutWeight(2)
+          TextInput({ placeholder: '域（可选）', text: this.domain })
+            .onChange((value: string) => {
+              this.domain = value;
+            })
+            .layoutWeight(1)
+        }
+        .width('100%')
+
+        Button(this.isConnecting ? '连接中…' : '连接')
+          .width('100%')
+          .enabled(!this.isConnecting)
+          .onClick(() => {
+            this.doConnect();
           })
-          .layoutWeight(2)
+
+        Text(this.status)
+          .fontSize(13)
+          .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
+          .width('100%')
+      } else {
+        Row({ space: 8 }) {
+          Text(this.host)
+            .fontSize(13)
+            .fontColor('#6B7280')
+            .layoutWeight(1)
+          Text(this.status)
+            .fontSize(12)
+            .fontColor('#6B7280')
+          Button('断开')
+            .fontSize(12)
+            .onClick(() => {
+              this.disconnect();
+            })
+        }
+        .width('100%')
       }
-      .width('100%')
-
-      Row({ space: 10 }) {
-        TextInput({ placeholder: '密码', text: this.password })
-          .type(InputType.Password)
-          .onChange((value: string) => {
-            this.password = value;
-          })
-          .layoutWeight(2)
-        TextInput({ placeholder: '域（可选）', text: this.domain })
-          .onChange((value: string) => {
-            this.domain = value;
-          })
-          .layoutWeight(1)
-      }
-      .width('100%')
-
-      Button(this.isConnecting ? '连接中…' : '连接')
-        .width('100%')
-        .enabled(!this.isConnecting)
-        .onClick(() => {
-          this.doConnect();
-        })
-
-      Text(this.status)
-        .fontSize(13)
-        .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
-        .width('100%')
 
       Row({ space: 8 }) {
         Button('左键')
@@ -399,58 +431,60 @@ struct Index {
           )
       } else {
         Column() {
-          Text('等待远程画面…')
+          Text(this.connected ? '等待远程画面…' : '连接后在此显示远程桌面')
             .fontSize(14)
             .fontColor('#9CA3AF')
         }
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
-        .backgroundColor('#EEF1F6')
+        .backgroundColor(this.connected ? '#000000' : '#EEF1F6')
         .borderRadius(8)
       }
 
-      Row({ space: 8 }) {
-        TextInput({ placeholder: '键盘输入', text: this.keyboardText })
-          .onChange((value: string) => {
-            this.keyboardText = value;
-          })
-          .layoutWeight(1)
-        Button('发送')
-          .onClick(() => {
-            this.sendKeyboard();
-          })
-      }
-      .width('100%')
-
-      Row({ space: 8 }) {
-        Button('Enter').onClick(() => {
-          this.tapKey(0x1C);
-        })
-        Button('Backspace').onClick(() => {
-          this.tapKey(0x0E);
-        })
-        Button('Esc').onClick(() => {
-          this.tapKey(0x01);
-        })
-        Button('Tab').onClick(() => {
-          this.tapKey(0x0F);
-        })
-      }
-      .width('100%')
-
-      TextInput({ placeholder: '电脑键盘输入（点此聚焦）' })
-        .onKeyEvent((event: KeyEvent) => {
-          this.handleHardwareKey(event);
-        })
+      if (this.connected) {
+        Row({ space: 8 }) {
+          TextInput({ placeholder: '键盘输入', text: this.keyboardText })
+            .onChange((value: string) => {
+              this.keyboardText = value;
+            })
+            .layoutWeight(1)
+          Button('发送')
+            .onClick(() => {
+              this.sendKeyboard();
+            })
+        }
         .width('100%')
+
+        Row({ space: 8 }) {
+          Button('Enter').onClick(() => {
+            this.tapKey(0x1C);
+          })
+          Button('Backspace').onClick(() => {
+            this.tapKey(0x0E);
+          })
+          Button('Esc').onClick(() => {
+            this.tapKey(0x01);
+          })
+          Button('Tab').onClick(() => {
+            this.tapKey(0x0F);
+          })
+        }
+        .width('100%')
+
+        TextInput({ placeholder: '电脑键盘输入（点此聚焦）' })
+          .onKeyEvent((event: KeyEvent) => {
+            this.handleHardwareKey(event);
+          })
+          .width('100%')
+      }
 
       Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
         .fontSize(11)
         .fontColor('#9CA3AF')
         .width('100%')
     }
-    .padding(20)
+    .padding(this.connected ? 8 : 20)
     .width('100%')
     .height('100%')
     .alignItems(HorizontalAlign.Start)
