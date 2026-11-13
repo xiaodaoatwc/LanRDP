@@ -502,7 +502,7 @@ static napi_value SendUnicode(napi_env env, napi_callback_info info)
     if (g_session && g_session->context && g_session->context->input) {
         sent = freerdp_input_send_unicode_keyboard_event(
             g_session->context->input,
-            down ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE,
+            down ? 0 : KBD_FLAGS_RELEASE,
             static_cast<UINT16>(code));
     }
     napi_value result;
@@ -528,7 +528,7 @@ static napi_value SendKey(napi_env env, napi_callback_info info)
     std::lock_guard<std::mutex> lock(g_sessionMutex);
     bool sent = false;
     if (g_session && g_session->context && g_session->context->input) {
-        UINT16 flags = down ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE;
+        UINT16 flags = down ? 0 : KBD_FLAGS_RELEASE;
         if (extended)
             flags |= KBD_FLAGS_EXTENDED;
         sent = freerdp_input_send_keyboard_event(g_session->context->input, flags,

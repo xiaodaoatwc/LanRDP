@@ -300,26 +300,17 @@ struct Index {
     event.stopPropagation();
     const code = event.keyCode;
     if (code === 2047 || code === 2048) {
-      if (event.type === KeyType.Down) {
+      if (event.type === KeyType.Down && !this.shiftHeld) {
         this.shiftHeld = true;
-        this.shiftUsed = false;
-      } else if (event.type === KeyType.Up) {
-        if (!this.shiftUsed && this.shiftHeld) {
-          sendKey(0x2A, true, false);
-          setTimeout(() => {
-            sendKey(0x2A, false, false);
-          }, 60);
-        }
+        sendKey(0x2A, true, false);
+      } else if (event.type === KeyType.Up && this.shiftHeld) {
         this.shiftHeld = false;
-        this.shiftUsed = false;
+        sendKey(0x2A, false, false);
       }
       return;
     }
     if (event.type !== KeyType.Down) {
       return;
-    }
-    if (this.shiftHeld) {
-      this.shiftUsed = true;
     }
     if (code === 2054) { this.tapKey(0x1C); return; }
     if (code === 2055) { this.tapKey(0x0E); return; }
@@ -338,37 +329,25 @@ struct Index {
         0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
         0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C
       ];
-      if (this.shiftHeld) {
-        const upper = 65 + (code - 2017);
-        sendUnicode(upper, true);
-        sendUnicode(upper, false);
-      } else {
-        this.tapKey(letters[code - 2017]);
-      }
+      this.tapKey(letters[code - 2017]);
       return;
     }
     if (code >= 2000 && code <= 2009) {
       const digits: number[] = [0x0B, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
-      if (this.shiftHeld) {
-        const shifted = ')!@#$%^&*(';
-        sendUnicode(shifted.charCodeAt(code - 2000), true);
-        sendUnicode(shifted.charCodeAt(code - 2000), false);
-      } else {
-        this.tapKey(digits[code - 2000]);
-      }
+      this.tapKey(digits[code - 2000]);
       return;
     }
-    if (code === 2043) { this.shiftHeld ? sendUnicode(0x3C, true) : this.tapKey(0x33); if (this.shiftHeld) sendUnicode(0x3C, false); return; }
-    if (code === 2044) { this.shiftHeld ? sendUnicode(0x3E, true) : this.tapKey(0x34); if (this.shiftHeld) sendUnicode(0x3E, false); return; }
-    if (code === 2064) { this.shiftHeld ? sendUnicode(0x3F, true) : this.tapKey(0x35); if (this.shiftHeld) sendUnicode(0x3F, false); return; }
-    if (code === 2057) { this.shiftHeld ? sendUnicode(0x5F, true) : this.tapKey(0x0C); if (this.shiftHeld) sendUnicode(0x5F, false); return; }
-    if (code === 2058) { this.shiftHeld ? sendUnicode(0x2B, true) : this.tapKey(0x0D); if (this.shiftHeld) sendUnicode(0x2B, false); return; }
-    if (code === 2059) { this.shiftHeld ? sendUnicode(0x7B, true) : this.tapKey(0x1A); if (this.shiftHeld) sendUnicode(0x7B, false); return; }
-    if (code === 2060) { this.shiftHeld ? sendUnicode(0x7D, true) : this.tapKey(0x1B); if (this.shiftHeld) sendUnicode(0x7D, false); return; }
-    if (code === 2061) { this.shiftHeld ? sendUnicode(0x7C, true) : this.tapKey(0x2B); if (this.shiftHeld) sendUnicode(0x7C, false); return; }
-    if (code === 2062) { this.shiftHeld ? sendUnicode(0x3A, true) : this.tapKey(0x27); if (this.shiftHeld) sendUnicode(0x3A, false); return; }
-    if (code === 2063) { this.shiftHeld ? sendUnicode(0x22, true) : this.tapKey(0x28); if (this.shiftHeld) sendUnicode(0x22, false); return; }
-    if (code === 2056) { this.shiftHeld ? sendUnicode(0x7E, true) : this.tapKey(0x29); if (this.shiftHeld) sendUnicode(0x7E, false); return; }
+    if (code === 2043) { this.tapKey(0x33); return; }
+    if (code === 2044) { this.tapKey(0x34); return; }
+    if (code === 2064) { this.tapKey(0x35); return; }
+    if (code === 2057) { this.tapKey(0x0C); return; }
+    if (code === 2058) { this.tapKey(0x0D); return; }
+    if (code === 2059) { this.tapKey(0x1A); return; }
+    if (code === 2060) { this.tapKey(0x1B); return; }
+    if (code === 2061) { this.tapKey(0x2B); return; }
+    if (code === 2062) { this.tapKey(0x27); return; }
+    if (code === 2063) { this.tapKey(0x28); return; }
+    if (code === 2056) { this.tapKey(0x29); return; }
 
     const text = event.keyText;
     if (text.length === 1) {
