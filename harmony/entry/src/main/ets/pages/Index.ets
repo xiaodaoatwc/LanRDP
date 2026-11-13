@@ -305,7 +305,10 @@ struct Index {
         this.shiftUsed = false;
       } else if (event.type === KeyType.Up) {
         if (!this.shiftUsed && this.shiftHeld) {
-          this.tapKey(0x2A);
+          sendKey(0x2A, true, false);
+          setTimeout(() => {
+            sendKey(0x2A, false, false);
+          }, 60);
         }
         this.shiftHeld = false;
         this.shiftUsed = false;
