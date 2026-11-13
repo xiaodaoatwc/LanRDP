@@ -48,7 +48,9 @@ struct Index {
   private touchStartTime: number = 0;
   private lastClickY: number = 0;
   private shiftHeld: boolean = false;
+  private shiftPending: boolean = false;
   private shiftUsed: boolean = false;
+  private shiftTapTimer: number = -1;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -296,21 +298,53 @@ struct Index {
     sendKey(code, false, extended);
   }
 
+  private clearShiftTap(): void {
+    if (this.shiftTapTimer >= 0) {
+      clearTimeout(this.shiftTapTimer);
+      this.shiftTapTimer = -1;
+    }
+    this.shiftPending = false;
+  }
+
+  private scheduleShiftTap(): void {
+    this.clearShiftTap();
+    this.shiftPending = true;
+    this.shiftTapTimer = setTimeout(() => {
+      if (this.shiftPending) {
+        this.shiftPending = false;
+        this.shiftTapTimer = -1;
+        sendKey(0x2A, true, false);
+        setTimeout(() => {
+          sendKey(0x2A, false, false);
+        }, 40);
+      }
+    }, 120);
+  }
+
   private handleHardwareKey(event: KeyEvent): void {
     event.stopPropagation();
     const code = event.keyCode;
     if (code === 2047 || code === 2048) {
-      if (event.type === KeyType.Down && !this.shiftHeld) {
+      if (event.type === KeyType.Down) {
+        this.clearShiftTap();
         this.shiftHeld = true;
-        sendKey(0x2A, true, false);
-      } else if (event.type === KeyType.Up && this.shiftHeld) {
+        this.shiftUsed = false;
+      } else if (event.type === KeyType.Up) {
         this.shiftHeld = false;
-        sendKey(0x2A, false, false);
+        if (!this.shiftUsed)
+          this.scheduleShiftTap();
+        this.shiftUsed = false;
       }
       return;
     }
     if (event.type !== KeyType.Down) {
       return;
+    }
+    const shifted = this.shiftHeld || this.shiftPending;
+    if (shifted) {
+      this.clearShiftTap();
+      this.shiftHeld = false;
+      this.shiftUsed = true;
     }
     if (code === 2054) { this.tapKey(0x1C); return; }
     if (code === 2055) { this.tapKey(0x0E); return; }
@@ -329,25 +363,37 @@ struct Index {
         0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
         0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C
       ];
-      this.tapKey(letters[code - 2017]);
+      if (shifted) {
+        const upper = 65 + (code - 2017);
+        sendUnicode(upper, true);
+        sendUnicode(upper, false);
+      } else {
+        this.tapKey(letters[code - 2017]);
+      }
       return;
     }
     if (code >= 2000 && code <= 2009) {
       const digits: number[] = [0x0B, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
-      this.tapKey(digits[code - 2000]);
+      if (shifted) {
+        const shiftedDigits = ')!@#$%^&*(';
+        sendUnicode(shiftedDigits.charCodeAt(code - 2000), true);
+        sendUnicode(shiftedDigits.charCodeAt(code - 2000), false);
+      } else {
+        this.tapKey(digits[code - 2000]);
+      }
       return;
     }
-    if (code === 2043) { this.tapKey(0x33); return; }
-    if (code === 2044) { this.tapKey(0x34); return; }
-    if (code === 2064) { this.tapKey(0x35); return; }
-    if (code === 2057) { this.tapKey(0x0C); return; }
-    if (code === 2058) { this.tapKey(0x0D); return; }
-    if (code === 2059) { this.tapKey(0x1A); return; }
-    if (code === 2060) { this.tapKey(0x1B); return; }
-    if (code === 2061) { this.tapKey(0x2B); return; }
-    if (code === 2062) { this.tapKey(0x27); return; }
-    if (code === 2063) { this.tapKey(0x28); return; }
-    if (code === 2056) { this.tapKey(0x29); return; }
+    if (code === 2043) { if (shifted) { sendUnicode(0x3C, true); sendUnicode(0x3C, false); } else this.tapKey(0x33); return; }
+    if (code === 2044) { if (shifted) { sendUnicode(0x3E, true); sendUnicode(0x3E, false); } else this.tapKey(0x34); return; }
+    if (code === 2064) { if (shifted) { sendUnicode(0x3F, true); sendUnicode(0x3F, false); } else this.tapKey(0x35); return; }
+    if (code === 2057) { if (shifted) { sendUnicode(0x5F, true); sendUnicode(0x5F, false); } else this.tapKey(0x0C); return; }
+    if (code === 2058) { if (shifted) { sendUnicode(0x2B, true); sendUnicode(0x2B, false); } else this.tapKey(0x0D); return; }
+    if (code === 2059) { if (shifted) { sendUnicode(0x7B, true); sendUnicode(0x7B, false); } else this.tapKey(0x1A); return; }
+    if (code === 2060) { if (shifted) { sendUnicode(0x7D, true); sendUnicode(0x7D, false); } else this.tapKey(0x1B); return; }
+    if (code === 2061) { if (shifted) { sendUnicode(0x7C, true); sendUnicode(0x7C, false); } else this.tapKey(0x2B); return; }
+    if (code === 2062) { if (shifted) { sendUnicode(0x3A, true); sendUnicode(0x3A, false); } else this.tapKey(0x27); return; }
+    if (code === 2063) { if (shifted) { sendUnicode(0x22, true); sendUnicode(0x22, false); } else this.tapKey(0x28); return; }
+    if (code === 2056) { if (shifted) { sendUnicode(0x7E, true); sendUnicode(0x7E, false); } else this.tapKey(0x29); return; }
 
     const text = event.keyText;
     if (text.length === 1) {
