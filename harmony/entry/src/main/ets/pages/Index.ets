@@ -42,6 +42,7 @@ struct Index {
   private panLastY: number = 0;
   private panMoved: boolean = false;
   private touchStartTime: number = 0;
+  private lastClickY: number = 0;
   private shiftHeld: boolean = false;
   private mouseDown: boolean = false;
   private timer: number = -1;
@@ -220,6 +221,7 @@ struct Index {
         this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
       }
       this.lastWheelY = -1;
+      this.lastClickY = touch.y;
       this.mouseDown = true;
       this.touchMoved = false;
       this.longPressTriggered = false;
@@ -288,12 +290,10 @@ struct Index {
     event.stopPropagation();
     const code = event.keyCode;
     if (code === 2047 || code === 2048) {
-      if (event.type === KeyType.Down && !this.shiftHeld) {
+      if (event.type === KeyType.Down) {
         this.shiftHeld = true;
-        sendKey(0x2A, true, false);
-      } else if (event.type === KeyType.Up && this.shiftHeld) {
+      } else if (event.type === KeyType.Up) {
         this.shiftHeld = false;
-        sendKey(0x2A, false, false);
       }
       return;
     }
@@ -317,25 +317,37 @@ struct Index {
         0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
         0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C
       ];
-      this.tapKey(letters[code - 2017]);
+      if (this.shiftHeld) {
+        const upper = 65 + (code - 2017);
+        sendUnicode(upper, true);
+        sendUnicode(upper, false);
+      } else {
+        this.tapKey(letters[code - 2017]);
+      }
       return;
     }
     if (code >= 2000 && code <= 2009) {
       const digits: number[] = [0x0B, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
-      this.tapKey(digits[code - 2000]);
+      if (this.shiftHeld) {
+        const shifted = ')!@#$%^&*(';
+        sendUnicode(shifted.charCodeAt(code - 2000), true);
+        sendUnicode(shifted.charCodeAt(code - 2000), false);
+      } else {
+        this.tapKey(digits[code - 2000]);
+      }
       return;
     }
-    if (code === 2043) { this.tapKey(0x33); return; }
-    if (code === 2044) { this.tapKey(0x34); return; }
-    if (code === 2064) { this.tapKey(0x35); return; }
-    if (code === 2057) { this.tapKey(0x0C); return; }
-    if (code === 2058) { this.tapKey(0x0D); return; }
-    if (code === 2059) { this.tapKey(0x1A); return; }
-    if (code === 2060) { this.tapKey(0x1B); return; }
-    if (code === 2061) { this.tapKey(0x2B); return; }
-    if (code === 2062) { this.tapKey(0x27); return; }
-    if (code === 2063) { this.tapKey(0x28); return; }
-    if (code === 2056) { this.tapKey(0x29); return; }
+    if (code === 2043) { this.shiftHeld ? sendUnicode(0x3C, true) : this.tapKey(0x33); if (this.shiftHeld) sendUnicode(0x3C, false); return; }
+    if (code === 2044) { this.shiftHeld ? sendUnicode(0x3E, true) : this.tapKey(0x34); if (this.shiftHeld) sendUnicode(0x3E, false); return; }
+    if (code === 2064) { this.shiftHeld ? sendUnicode(0x3F, true) : this.tapKey(0x35); if (this.shiftHeld) sendUnicode(0x3F, false); return; }
+    if (code === 2057) { this.shiftHeld ? sendUnicode(0x5F, true) : this.tapKey(0x0C); if (this.shiftHeld) sendUnicode(0x5F, false); return; }
+    if (code === 2058) { this.shiftHeld ? sendUnicode(0x2B, true) : this.tapKey(0x0D); if (this.shiftHeld) sendUnicode(0x2B, false); return; }
+    if (code === 2059) { this.shiftHeld ? sendUnicode(0x7B, true) : this.tapKey(0x1A); if (this.shiftHeld) sendUnicode(0x7B, false); return; }
+    if (code === 2060) { this.shiftHeld ? sendUnicode(0x7D, true) : this.tapKey(0x1B); if (this.shiftHeld) sendUnicode(0x7D, false); return; }
+    if (code === 2061) { this.shiftHeld ? sendUnicode(0x7C, true) : this.tapKey(0x2B); if (this.shiftHeld) sendUnicode(0x7C, false); return; }
+    if (code === 2062) { this.shiftHeld ? sendUnicode(0x3A, true) : this.tapKey(0x27); if (this.shiftHeld) sendUnicode(0x3A, false); return; }
+    if (code === 2063) { this.shiftHeld ? sendUnicode(0x22, true) : this.tapKey(0x28); if (this.shiftHeld) sendUnicode(0x22, false); return; }
+    if (code === 2056) { this.shiftHeld ? sendUnicode(0x7E, true) : this.tapKey(0x29); if (this.shiftHeld) sendUnicode(0x7E, false); return; }
 
     const text = event.keyText;
     if (text.length === 1) {
@@ -359,6 +371,7 @@ struct Index {
   private onInputFocus(): void {
     this.inputFocused = true;
     this.keyboardVisible = false;
+    this.adjustViewForInput();
   }
 
   private onInputBlur(): void {
@@ -375,6 +388,7 @@ struct Index {
     this.getUIContext().getFocusController().clearFocus();
     this.inputFocused = false;
     this.keyboardVisible = true;
+    this.adjustViewForInput();
   }
 
   private sendMouseMoveAt(x: number, y: number, button?: number): void {
@@ -494,6 +508,26 @@ struct Index {
   }
 
   @Builder
+  NavKey(label: string, code: number, extended: boolean = false) {
+    Button(label)
+      .fontSize(11)
+      .height(56)
+      .width(72)
+      .padding(0)
+      .borderRadius(4)
+      .backgroundColor(this.keyBg())
+      .fontColor(this.keyFg())
+      .stateStyles({
+        pressed: {
+          .backgroundColor('#2563EB')
+        }
+      })
+      .onClick(() => {
+        this.pressKey(code, extended);
+      })
+  }
+
+  @Builder
   ModKey(label: string, code: number, active: boolean, extended: boolean = false, weight: number = 1) {
     Button(label)
       .fontSize(11)
@@ -528,17 +562,17 @@ struct Index {
   }
 
   private adjustViewForInput(): void {
-    if (this.lastTouchY <= 0 || this.imageViewHeight <= 0) {
+    if (this.lastClickY <= 0 || this.imageViewHeight <= 0) {
       return;
     }
     const keyboardHeight = this.imageViewHeight * 0.42;
     const visibleHeight = Math.max(80, this.imageViewHeight - keyboardHeight);
-    if (this.lastTouchY <= visibleHeight * 0.6) {
+    if (this.lastClickY <= visibleHeight * 0.6) {
       this.viewOffsetY = 0;
       return;
     }
     const targetY = visibleHeight * 0.42;
-    const desired = targetY - this.lastTouchY;
+    const desired = targetY - this.lastClickY;
     this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, desired));
   }
 
@@ -733,16 +767,41 @@ struct Index {
             })
             .layoutWeight(1)
           Button('发送')
+            .height(56)
+            .borderRadius(4)
+            .backgroundColor(this.keyBg())
+            .fontColor(this.keyFg())
+            .stateStyles({
+              pressed: {
+                .backgroundColor('#2563EB')
+              }
+            })
             .onClick(() => {
               this.sendKeyboard();
             })
           Button('移动窗口')
-            .backgroundColor(this.moveMode ? '#2563EB' : '#E5E7EB')
-            .fontColor(this.moveMode ? '#FFFFFF' : '#111827')
+            .height(56)
+            .borderRadius(4)
+            .backgroundColor(this.moveMode ? '#2563EB' : this.keyBg())
+            .fontColor(this.moveMode ? '#FFFFFF' : this.keyFg())
+            .stateStyles({
+              pressed: {
+                .backgroundColor('#2563EB')
+              }
+            })
             .onClick(() => {
               this.moveMode = !this.moveMode;
             })
           Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+            .height(56)
+            .borderRadius(4)
+            .backgroundColor(this.keyBg())
+            .fontColor(this.keyFg())
+            .stateStyles({
+              pressed: {
+                .backgroundColor('#2563EB')
+              }
+            })
             .onClick(() => {
               this.toggleVirtualKeyboard();
             })
@@ -770,7 +829,7 @@ struct Index {
             this.Key2('_', '-', 0x0C)
             this.Key2('+', '=', 0x0D)
             this.Key('Backspace', 0x0E, false, 2)
-            this.Key('Delete', 0x53, true)
+            this.NavKey('Delete', 0x53, true)
           }
           .width('100%')
 
@@ -789,7 +848,7 @@ struct Index {
             this.Key2('{', '[', 0x1A)
             this.Key2('}', ']', 0x1B)
             this.Key2('|', '\\', 0x2B)
-            this.Key('PrtSc', 0x37, true)
+            this.NavKey('PrtSc', 0x37, true)
           }
           .width('100%')
 
@@ -807,7 +866,7 @@ struct Index {
             this.Key2(':', ';', 0x27)
             this.Key2('\"', "'", 0x28)
             this.Key('Enter', 0x1C, false, 2)
-            this.Key('PgUp', 0x49, true)
+            this.NavKey('PgUp', 0x49, true)
           }
           .width('100%')
 
@@ -824,8 +883,8 @@ struct Index {
             this.Key2('>', '.', 0x34)
             this.Key2('?', '/', 0x35)
             this.ModKey('Shift', 0x36, this.shiftActive, false, 2)
-            this.Key('↑', 0x48, true)
-            this.Key('PgDn', 0x51, true, 1)
+            this.NavKey('↑', 0x48, true)
+            this.NavKey('PgDn', 0x51, true)
           }
           .width('100%')
 
@@ -840,14 +899,14 @@ struct Index {
                 this.toggleCombo();
               })
             this.ModKey('Ctrl', 0x1D, this.ctrlActive, false)
-            this.Key('Win', 0x5B, true)
+            this.NavKey('Win', 0x5B, true)
             this.ModKey('Alt', 0x38, this.altActive, false)
             this.Key('Space', 0x39, false, 5)
             this.ModKey('Alt', 0x38, this.altActive, false)
             this.ModKey('Ctrl', 0x1D, this.ctrlActive, false)
-            this.Key('←', 0x4B, true)
-            this.Key('↓', 0x50, true)
-            this.Key('→', 0x4D, true)
+            this.NavKey('←', 0x4B, true)
+            this.NavKey('↓', 0x50, true)
+            this.NavKey('→', 0x4D, true)
           }
           .width('100%')
         }
