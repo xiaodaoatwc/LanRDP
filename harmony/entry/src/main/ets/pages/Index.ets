@@ -35,15 +35,18 @@ struct Index {
   @State private keyStyle: number = 0;
   @State private inputFocused: boolean = false;
   @State private viewOffsetY: number = 0;
+  @State private viewScale: number = 1;
   @State private systemKeyboardHeight: number = 0;
   @State private virtualKeyboardHeight: number = 0;
   private comboKeys: ComboKey[] = [];
   private appWindow: window.Window | null = null;
   private panLastY: number = 0;
   private panMoved: boolean = false;
+  private pinchStartScale: number = 1;
   private touchStartTime: number = 0;
   private lastClickY: number = 0;
   private shiftHeld: boolean = false;
+  private shiftUsed: boolean = false;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -276,8 +279,10 @@ struct Index {
     if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
       return;
     }
-    const remoteX = Math.floor((x - left) / scale);
-    const remoteY = Math.floor((y - this.viewOffsetY - top) / scale);
+    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2;
+    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2;
+    const remoteX = Math.floor((scaledX - left) / scale);
+    const remoteY = Math.floor((scaledY - this.viewOffsetY - top) / scale);
     sendMouse(remoteX, remoteY, button ?? this.mouseButton, down);
   }
 
@@ -292,13 +297,21 @@ struct Index {
     if (code === 2047 || code === 2048) {
       if (event.type === KeyType.Down) {
         this.shiftHeld = true;
+        this.shiftUsed = false;
       } else if (event.type === KeyType.Up) {
+        if (!this.shiftUsed && this.shiftHeld) {
+          this.tapKey(0x2A);
+        }
         this.shiftHeld = false;
+        this.shiftUsed = false;
       }
       return;
     }
     if (event.type !== KeyType.Down) {
       return;
+    }
+    if (this.shiftHeld) {
+      this.shiftUsed = true;
     }
     if (code === 2054) { this.tapKey(0x1C); return; }
     if (code === 2055) { this.tapKey(0x0E); return; }
@@ -362,6 +375,8 @@ struct Index {
     this.frameImage?.release();
     this.frameImage = null;
     this.frameVersion = 0;
+    this.viewScale = 1;
+    this.viewOffsetY = 0;
     this.connected = false;
     this.mouseDown = false;
     this.longPressTriggered = false;
@@ -404,8 +419,10 @@ struct Index {
     if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
       return;
     }
-    const remoteX = Math.floor((x - left) / scale);
-    const remoteY = Math.floor((y - this.viewOffsetY - top) / scale);
+    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2;
+    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2;
+    const remoteX = Math.floor((scaledX - left) / scale);
+    const remoteY = Math.floor((scaledY - this.viewOffsetY - top) / scale);
     sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
@@ -669,6 +686,7 @@ struct Index {
             .backgroundColor('#000000')
             .borderRadius(8)
             .translate({ y: this.viewOffsetY })
+            .scale({ x: this.viewScale, y: this.viewScale })
             .onAreaChange((_oldValue: Area, newValue: Area) => {
               this.imageViewWidth = Number(newValue.width);
               this.imageViewHeight = Number(newValue.height);
@@ -717,6 +735,13 @@ struct Index {
                       sendWheel(delta > 0 ? -120 : 120);
                       this.lastPanOffsetY = event.offsetY;
                     }
+                  }),
+                PinchGesture({ fingers: 2 })
+                  .onActionStart(() => {
+                    this.pinchStartScale = this.viewScale;
+                  })
+                  .onActionUpdate((event: GestureEvent) => {
+                    this.viewScale = Math.max(0.5, Math.min(3, this.pinchStartScale * event.scale));
                   })
               )
             )
@@ -754,7 +779,7 @@ struct Index {
       .backgroundColor('#F7F9FC')
 
       if (this.connected) {
-        Row({ space: 8 }) {
+        Row({ space: 4 }) {
           TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
             .onChange((value: string) => {
               this.keyboardText = value;
@@ -765,46 +790,66 @@ struct Index {
             .onBlur(() => {
               this.onInputBlur();
             })
+            .height(56)
+            .borderRadius(4)
             .layoutWeight(1)
-          Button('发送')
-            .height(56)
-            .borderRadius(4)
-            .backgroundColor(this.keyBg())
-            .fontColor(this.keyFg())
-            .stateStyles({
-              pressed: {
-                .backgroundColor('#2563EB')
-              }
-            })
-            .onClick(() => {
-              this.sendKeyboard();
-            })
-          Button('移动窗口')
-            .height(56)
-            .borderRadius(4)
-            .backgroundColor(this.moveMode ? '#2563EB' : this.keyBg())
-            .fontColor(this.moveMode ? '#FFFFFF' : this.keyFg())
-            .stateStyles({
-              pressed: {
-                .backgroundColor('#2563EB')
-              }
-            })
-            .onClick(() => {
-              this.moveMode = !this.moveMode;
-            })
-          Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
-            .height(56)
-            .borderRadius(4)
-            .backgroundColor(this.keyBg())
-            .fontColor(this.keyFg())
-            .stateStyles({
-              pressed: {
-                .backgroundColor('#2563EB')
-              }
-            })
-            .onClick(() => {
-              this.toggleVirtualKeyboard();
-            })
+
+          Button() {
+            Row({ space: 4 }) {
+              Text('✈').fontSize(16).fontColor(this.keyFg())
+              Text('发送').fontSize(12).fontColor(this.keyFg())
+            }
+          }
+          .width(110)
+          .height(56)
+          .borderRadius(4)
+          .backgroundColor(this.keyBg())
+          .stateStyles({
+            pressed: {
+              .backgroundColor('#2563EB')
+            }
+          })
+          .onClick(() => {
+            this.sendKeyboard();
+          })
+
+          Button() {
+            Row({ space: 4 }) {
+              Text('✥').fontSize(16).fontColor(this.moveMode ? '#FFFFFF' : this.keyFg())
+              Text('移动').fontSize(12).fontColor(this.moveMode ? '#FFFFFF' : this.keyFg())
+            }
+          }
+          .width(120)
+          .height(56)
+          .borderRadius(4)
+          .backgroundColor(this.moveMode ? '#2563EB' : this.keyBg())
+          .stateStyles({
+            pressed: {
+              .backgroundColor('#2563EB')
+            }
+          })
+          .onClick(() => {
+            this.moveMode = !this.moveMode;
+          })
+
+          Button() {
+            Row({ space: 4 }) {
+              Text('⌨').fontSize(16).fontColor(this.keyFg())
+              Text(this.keyboardVisible ? '收起' : '键盘').fontSize(12).fontColor(this.keyFg())
+            }
+          }
+          .width(120)
+          .height(56)
+          .borderRadius(4)
+          .backgroundColor(this.keyBg())
+          .stateStyles({
+            pressed: {
+              .backgroundColor('#2563EB')
+            }
+          })
+          .onClick(() => {
+            this.toggleVirtualKeyboard();
+          })
         }
         .width('100%')
         .padding({ left: 8, right: 8, top: 4, bottom: 4 })
@@ -892,9 +937,15 @@ struct Index {
             Button(this.comboActive ? '组合键•' : '组合键')
               .fontSize(12)
               .height(56)
+              .borderRadius(4)
               .layoutWeight(2)
-              .backgroundColor(this.comboActive ? '#2563EB' : '#E5E7EB')
-              .fontColor(this.comboActive ? '#FFFFFF' : '#111827')
+              .backgroundColor(this.comboActive ? '#2563EB' : this.keyBg())
+              .fontColor(this.comboActive ? '#FFFFFF' : this.keyFg())
+              .stateStyles({
+                pressed: {
+                  .backgroundColor('#2563EB')
+                }
+              })
               .onClick(() => {
                 this.toggleCombo();
               })
