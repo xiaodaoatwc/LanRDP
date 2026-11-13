@@ -43,6 +43,8 @@ struct Index {
   private panLastY: number = 0;
   private panMoved: boolean = false;
   private pinchStartScale: number = 1;
+  private imageGlobalX: number = 0;
+  private imageGlobalY: number = 0;
   private touchStartTime: number = 0;
   private lastClickY: number = 0;
   private shiftHeld: boolean = false;
@@ -183,24 +185,26 @@ struct Index {
     }
 
     const touch = event.touches[0];
+    const touchX = touch.windowX - this.imageGlobalX;
+    const touchY = touch.windowY - this.imageGlobalY;
     if (this.moveMode) {
       if (event.type === TouchType.Down) {
-        this.panLastY = touch.y;
+        this.panLastY = touchY;
         this.panMoved = false;
       } else if (event.type === TouchType.Move) {
-        const delta = touch.y - this.panLastY;
+        const delta = touchY - this.panLastY;
         if (Math.abs(delta) > 4) {
           this.panMoved = true;
         }
         this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, this.viewOffsetY + delta));
-        this.panLastY = touch.y;
+        this.panLastY = touchY;
       }
       return;
     }
     const previousX = this.lastTouchX;
     const previousY = this.lastTouchY;
-    this.lastTouchX = touch.x;
-    this.lastTouchY = touch.y;
+    this.lastTouchX = touchX;
+    this.lastTouchY = touchY;
 
     if (event.touches.length >= 2) {
       this.cancelLongPress();
@@ -209,7 +213,8 @@ struct Index {
         this.mouseDown = false;
       }
       const second = event.touches[1];
-      const averageY = (touch.y + second.y) / 2;
+      const secondY = second.windowY - this.imageGlobalY;
+      const averageY = (touchY + secondY) / 2;
       if (this.lastWheelY >= 0 && Math.abs(averageY - this.lastWheelY) >= 12) {
         sendWheel(averageY < this.lastWheelY ? 120 : -120);
         this.lastWheelY = averageY;
@@ -224,12 +229,12 @@ struct Index {
         this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
       }
       this.lastWheelY = -1;
-      this.lastClickY = touch.y;
+      this.lastClickY = touchY;
       this.mouseDown = true;
       this.touchMoved = false;
       this.longPressTriggered = false;
       this.touchStartTime = Date.now();
-      this.sendMouseAt(touch.x, touch.y, true);
+      this.sendMouseAt(touchX, touchY, true);
 
       this.cancelLongPress();
       this.longPressTimer = setTimeout(() => {
@@ -241,24 +246,24 @@ struct Index {
         }
       }, 550);
     } else if (event.type === TouchType.Move && this.mouseDown) {
-      if (Math.abs(touch.x - previousX) > 6 || Math.abs(touch.y - previousY) > 6) {
+      if (Math.abs(touchX - previousX) > 6 || Math.abs(touchY - previousY) > 6) {
         this.touchMoved = true;
       }
       if (this.touchMoved) {
         this.cancelLongPress();
       }
       if (!this.longPressTriggered) {
-        this.sendMouseMoveAt(touch.x, touch.y, this.mouseButton);
+        this.sendMouseMoveAt(touchX, touchY, this.mouseButton);
       }
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
       const held = Date.now() - this.touchStartTime;
       if (!this.longPressTriggered && held > 550 && !this.touchMoved) {
-        this.sendMouseAt(touch.x, touch.y, false, 1);
-        this.sendMouseAt(touch.x, touch.y, true, 2);
-        this.sendMouseAt(touch.x, touch.y, false, 2);
+        this.sendMouseAt(touchX, touchY, false, 1);
+        this.sendMouseAt(touchX, touchY, true, 2);
+        this.sendMouseAt(touchX, touchY, false, 2);
       } else if (!this.longPressTriggered) {
-        this.sendMouseAt(touch.x, touch.y, false);
+        this.sendMouseAt(touchX, touchY, false);
       }
       this.mouseDown = false;
       this.longPressTriggered = false;
@@ -690,6 +695,8 @@ struct Index {
             .onAreaChange((_oldValue: Area, newValue: Area) => {
               this.imageViewWidth = Number(newValue.width);
               this.imageViewHeight = Number(newValue.height);
+              this.imageGlobalX = Number(newValue.globalPosition.x);
+              this.imageGlobalY = Number(newValue.globalPosition.y);
             })
             .onTouch((event: TouchEvent) => {
               this.handleTouch(event);
