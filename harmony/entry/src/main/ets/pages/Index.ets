@@ -35,6 +35,7 @@ struct Index {
   @State private viewOffsetY: number = 0;
   private comboKeys: ComboKey[] = [];
   private panLastY: number = 0;
+  private panMoved: boolean = false;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -156,11 +157,15 @@ struct Index {
     }
 
     const touch = event.touches[0];
-    if (this.inputFocused) {
+    if (this.inputFocused || this.keyboardVisible) {
       if (event.type === TouchType.Down) {
         this.panLastY = touch.y;
+        this.panMoved = false;
       } else if (event.type === TouchType.Move) {
         const delta = touch.y - this.panLastY;
+        if (Math.abs(delta) > 4) {
+          this.panMoved = true;
+        }
         this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, this.viewOffsetY + delta));
         this.panLastY = touch.y;
       }
@@ -312,6 +317,18 @@ struct Index {
     this.viewOffsetY = 0;
   }
 
+  private toggleVirtualKeyboard(): void {
+    if (this.keyboardVisible) {
+      this.keyboardVisible = false;
+      this.viewOffsetY = 0;
+      return;
+    }
+    this.getUIContext().getFocusController().clearFocus();
+    this.inputFocused = false;
+    this.keyboardVisible = true;
+    this.adjustViewForInput();
+  }
+
   private sendKeyboard(): void {
     const text = this.keyboardText;
     if (text.length === 0) {
@@ -395,6 +412,10 @@ struct Index {
     }
     const keyboardHeight = this.imageViewHeight * 0.42;
     const visibleHeight = Math.max(80, this.imageViewHeight - keyboardHeight);
+    if (this.lastTouchY <= visibleHeight * 0.6) {
+      this.viewOffsetY = 0;
+      return;
+    }
     const targetY = visibleHeight * 0.42;
     const desired = targetY - this.lastTouchY;
     this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, desired));
@@ -495,9 +516,7 @@ struct Index {
               })
             Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
               .onClick(() => {
-                this.inputFocused = false;
-                this.viewOffsetY = 0;
-                this.keyboardVisible = !this.keyboardVisible;
+                this.toggleVirtualKeyboard();
               })
           }
           .width('100%')
