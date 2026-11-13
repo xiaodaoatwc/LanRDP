@@ -31,6 +31,8 @@ struct Index {
   @State private ctrlActive: boolean = false;
   @State private altActive: boolean = false;
   @State private comboActive: boolean = false;
+  @State private moveMode: boolean = false;
+  @State private keyStyle: number = 0;
   @State private inputFocused: boolean = false;
   @State private viewOffsetY: number = 0;
   @State private systemKeyboardHeight: number = 0;
@@ -40,6 +42,7 @@ struct Index {
   private panLastY: number = 0;
   private panMoved: boolean = false;
   private touchStartTime: number = 0;
+  private shiftHeld: boolean = false;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -176,7 +179,7 @@ struct Index {
     }
 
     const touch = event.touches[0];
-    if (this.inputFocused || this.keyboardVisible) {
+    if (this.moveMode) {
       if (event.type === TouchType.Down) {
         this.panLastY = touch.y;
         this.panMoved = false;
@@ -282,10 +285,21 @@ struct Index {
   }
 
   private handleHardwareKey(event: KeyEvent): void {
+    event.stopPropagation();
+    const code = event.keyCode;
+    if (code === 2047 || code === 2048) {
+      if (event.type === KeyType.Down && !this.shiftHeld) {
+        this.shiftHeld = true;
+        sendKey(0x2A, true, false);
+      } else if (event.type === KeyType.Up && this.shiftHeld) {
+        this.shiftHeld = false;
+        sendKey(0x2A, false, false);
+      }
+      return;
+    }
     if (event.type !== KeyType.Down) {
       return;
     }
-    const code = event.keyCode;
     if (code === 2054) { this.tapKey(0x1C); return; }
     if (code === 2055) { this.tapKey(0x0E); return; }
     if (code === 2070) { this.tapKey(0x01); return; }
@@ -345,8 +359,6 @@ struct Index {
   private onInputFocus(): void {
     this.inputFocused = true;
     this.keyboardVisible = false;
-    this.adjustViewForInput();
-    this.panLastY = this.lastTouchY;
   }
 
   private onInputBlur(): void {
@@ -363,7 +375,6 @@ struct Index {
     this.getUIContext().getFocusController().clearFocus();
     this.inputFocused = false;
     this.keyboardVisible = true;
-    this.adjustViewForInput();
   }
 
   private sendMouseMoveAt(x: number, y: number, button?: number): void {
@@ -424,14 +435,30 @@ struct Index {
     this.altActive = false;
   }
 
+  private keyBg(): string {
+    return this.keyStyle === 0 ? '#E5E7EB' : '#374151';
+  }
+
+  private keyFg(): string {
+    return this.keyStyle === 0 ? '#111827' : '#F9FAFB';
+  }
+
   @Builder
   Key(label: string, code: number, extended: boolean = false, weight: number = 1) {
     Button(label)
       .fontSize(11)
       .height(56)
       .padding(0)
+      .borderRadius(4)
       .constraintSize({ minWidth: 0 })
       .layoutWeight(weight)
+      .backgroundColor(this.keyBg())
+      .fontColor(this.keyFg())
+      .stateStyles({
+        pressed: {
+          .backgroundColor('#2563EB')
+        }
+      })
       .onClick(() => {
         this.pressKey(code, extended);
       })
@@ -443,17 +470,24 @@ struct Index {
       Column({ space: 0 }) {
         Text(top)
           .fontSize(9)
-          .fontColor('#E5E7EB')
+          .fontColor(this.keyFg())
         Text(bottom)
           .fontSize(12)
-          .fontColor('#FFFFFF')
+          .fontColor(this.keyFg())
       }
       .justifyContent(FlexAlign.Center)
     }
     .height(56)
     .padding(0)
+    .borderRadius(4)
     .constraintSize({ minWidth: 0 })
     .layoutWeight(weight)
+    .backgroundColor(this.keyBg())
+    .stateStyles({
+      pressed: {
+        .backgroundColor('#2563EB')
+      }
+    })
     .onClick(() => {
       this.pressKey(code, extended);
     })
@@ -465,10 +499,16 @@ struct Index {
       .fontSize(11)
       .height(56)
       .padding(0)
+      .borderRadius(4)
       .constraintSize({ minWidth: 0 })
       .layoutWeight(weight)
-      .backgroundColor(active ? '#2563EB' : '#E5E7EB')
-      .fontColor(active ? '#FFFFFF' : '#111827')
+      .backgroundColor(active ? '#2563EB' : this.keyBg())
+      .fontColor(active ? '#FFFFFF' : this.keyFg())
+      .stateStyles({
+        pressed: {
+          .backgroundColor('#2563EB')
+        }
+      })
       .onClick(() => {
         if (this.comboActive) {
           sendKey(code, true, extended);
@@ -571,6 +611,11 @@ struct Index {
             Text(this.status)
               .fontSize(12)
               .fontColor('#6B7280')
+            Button('键帽')
+              .fontSize(12)
+              .onClick(() => {
+                this.keyStyle = (this.keyStyle + 1) % 2;
+              })
             Button('断开')
               .fontSize(12)
               .onClick(() => {
@@ -690,6 +735,12 @@ struct Index {
           Button('发送')
             .onClick(() => {
               this.sendKeyboard();
+            })
+          Button('移动窗口')
+            .backgroundColor(this.moveMode ? '#2563EB' : '#E5E7EB')
+            .fontColor(this.moveMode ? '#FFFFFF' : '#111827')
+            .onClick(() => {
+              this.moveMode = !this.moveMode;
             })
           Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
             .onClick(() => {
