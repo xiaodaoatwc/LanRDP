@@ -3,6 +3,25 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.1 — 2026-11-13
+
+### 中文
+
+- 修复右 Shift 组合键被 FreeRDP 客户端快捷键截获的问题：
+  右 Shift+D 会直接断开连接，右 Shift+G / 右 Shift+R 打不出对应的大写字母，
+  右 Shift+M 会把窗口最小化。
+- 客户端快捷键的修饰键从“单独的右 Shift”改为“左 Ctrl + 左 Alt”，
+  正常输入大写字母不再被截获；全屏切换等快捷键相应变为左 Ctrl + 左 Alt + 按键。
+
+### English
+
+- Fixed right Shift combinations being captured by the FreeRDP client shortcuts:
+  right Shift+D disconnected the session, right Shift+G/R swallowed the capital letters,
+  and right Shift+M minimized the window.
+- Client shortcuts now require left Ctrl + left Alt instead of a lone right Shift, so typing
+  capital letters always reaches the remote desktop. Fullscreen and the other shortcuts
+  become left Ctrl + left Alt + key.
+
 ## 1.14 — 2026-11-11
 
 ### 中文

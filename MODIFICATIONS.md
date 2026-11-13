@@ -52,6 +52,17 @@ LanRDP 分发的 `sdl-freerdp` 基于 FreeRDP 3.33.0，包含以下本地修改�
 - **原因**：FreeRDP 初始化窗口模式时也会调用一次 `setFullscreen(false)`；原来的实现会把
   `/w`、`/h` 指定的窗口尺寸直接改成可见桌面大小，导致指定分辨率失效。
 
+## 8. `client/SDL/SDL3/sdl_input.cpp`（客户端快捷键修饰键）
+
+- **修改**：`SDL_KeyModMask` 的默认值从 `KMOD_RSHIFT` 改为 `KMOD_LCTRL` + `KMOD_LALT`。
+- **原因**：FreeRDP 默认把单独的右 Shift 当作客户端快捷键修饰键，导致右 Shift 无法用于
+  输入大写字母：右 Shift+D 会直接断开连接（`SDL_Disconnect`），右 Shift+G / 右 Shift+R
+  被 `SDL_Grab` / `SDL_Resizeable` 截获所以打不出字母，右 Shift+M 会最小化窗口
+  （`SDL_Minimize`）。改成左 Ctrl+左 Alt 后，正常打字不会再触发客户端快捷键。
+- **注意**：快捷键判断是 `(mod & mask) == mask`，不能写聚合的 `KMOD_CTRL` / `KMOD_ALT`
+  （它们同时包含左右两侧的位，真实按键永远匹配不上）；必须写左右具体的 `KMOD_LCTRL`、
+  `KMOD_LALT`。因此右 Ctrl / 右 Alt 不会触发快捷键，会正常发送到远程桌面。
+
 补丁文件位于 `patches/`，可在 FreeRDP 源码根目录执行：
 
 ```bash
@@ -62,6 +73,7 @@ patch -p1 < patches/0004-sdl-context-hidden-window.patch
 patch -p1 < patches/0005-sdl-window-usable-bounds.patch
 patch -p1 < patches/0006-sdl-disp-native-fullscreen-exit.patch
 patch -p1 < patches/0007-sdl-window-fullscreen-only.patch
+patch -p1 < patches/0008-sdl-input-hotkey-modifier.patch
 ```
 
-修改日期：2026-11-08。
+修改日期：2026-11-08，2026-11-13 增补第 8 项。
