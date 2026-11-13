@@ -53,9 +53,14 @@ struct Index {
     window.getLastWindow(getContext(this)).then((win: window.Window) => {
       this.appWindow = win;
       win.on('keyboardHeightChange', (height: number) => {
+        console.info(`LanRDP keyboardHeight ${height}`);
         this.systemKeyboardHeight = height;
       });
     });
+  }
+
+  onPageShow(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
   }
 
   aboutToDisappear(): void {
@@ -395,13 +400,13 @@ struct Index {
   }
 
   @Builder
-  ModKey(label: string, code: number, active: boolean, extended: boolean = false) {
+  ModKey(label: string, code: number, active: boolean, extended: boolean = false, weight: number = 1) {
     Button(label)
       .fontSize(11)
       .height(38)
       .padding(0)
       .constraintSize({ minWidth: 0 })
-      .layoutWeight(1)
+      .layoutWeight(weight)
       .backgroundColor(active ? '#2563EB' : '#E5E7EB')
       .fontColor(active ? '#FFFFFF' : '#111827')
       .onClick(() => {
@@ -599,31 +604,6 @@ struct Index {
           .borderRadius(8)
         }
 
-        if (this.connected) {
-          Row({ space: 8 }) {
-            TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
-              .onChange((value: string) => {
-                this.keyboardText = value;
-              })
-              .onFocus(() => {
-                this.onInputFocus();
-              })
-              .onBlur(() => {
-                this.onInputBlur();
-              })
-              .layoutWeight(1)
-            Button('发送')
-              .onClick(() => {
-                this.sendKeyboard();
-              })
-            Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
-              .onClick(() => {
-                this.toggleVirtualKeyboard();
-              })
-          }
-          .width('100%')
-          .translate({ y: -this.systemKeyboardHeight })
-        }
 
         if (!this.connected) {
           Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
@@ -638,8 +618,49 @@ struct Index {
       .alignItems(HorizontalAlign.Start)
       .backgroundColor('#F7F9FC')
 
+      if (this.connected) {
+        Row({ space: 8 }) {
+          TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+            .onChange((value: string) => {
+              this.keyboardText = value;
+            })
+            .onFocus(() => {
+              this.onInputFocus();
+            })
+            .onBlur(() => {
+              this.onInputBlur();
+            })
+            .layoutWeight(1)
+          Button('发送')
+            .onClick(() => {
+              this.sendKeyboard();
+            })
+          Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+            .onClick(() => {
+              this.toggleVirtualKeyboard();
+            })
+        }
+        .width('100%')
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .backgroundColor('#F7F9FC')
+      }
+
       if (this.connected && this.keyboardVisible) {
         Column({ space: 4 }) {
+          Row() {
+            Text('虚拟键盘')
+              .fontSize(12)
+              .fontColor('#6B7280')
+              .layoutWeight(1)
+            Button('收起')
+              .fontSize(12)
+              .height(30)
+              .onClick(() => {
+                this.toggleVirtualKeyboard();
+              })
+          }
+          .width('100%')
+
           Row({ space: 4 }) {
             this.Key('Esc', 0x01)
             this.Key('1', 0x02)
@@ -660,7 +681,7 @@ struct Index {
           .width('100%')
 
           Row({ space: 4 }) {
-            this.Key('Tab', 0x0F, false, 2)
+            this.Key('Tab', 0x0F, false, 1)
             this.Key('Q', 0x10)
             this.Key('W', 0x11)
             this.Key('E', 0x12)
@@ -674,7 +695,7 @@ struct Index {
             this.Key('[', 0x1A)
             this.Key(']', 0x1B)
             this.Key('\\', 0x2B)
-            this.Key('PrtSc', 0x37, true, 2)
+            this.Key('PrtSc', 0x37, true)
           }
           .width('100%')
 
@@ -692,12 +713,12 @@ struct Index {
             this.Key(';', 0x27)
             this.Key("'", 0x28)
             this.Key('Enter', 0x1C, false, 2)
-            this.Key('PgUp', 0x49, true, 2)
+            this.Key('PgUp', 0x49, true)
           }
           .width('100%')
 
           Row({ space: 4 }) {
-            this.ModKey('Shift', 0x2A, this.shiftActive, false)
+            this.ModKey('Shift', 0x2A, this.shiftActive, false, 2)
             this.Key('Z', 0x2C)
             this.Key('X', 0x2D)
             this.Key('C', 0x2E)
@@ -708,9 +729,10 @@ struct Index {
             this.Key(',', 0x33)
             this.Key('.', 0x34)
             this.Key('/', 0x35)
-            this.ModKey('Shift', 0x36, this.shiftActive, false)
+            this.ModKey('Shift', 0x36, this.shiftActive, false, 2)
+            Blank().layoutWeight(1)
             this.Key('↑', 0x48, true)
-            this.Key('PgDn', 0x51, true, 2)
+            this.Key('PgDn', 0x51, true)
           }
           .width('100%')
 
