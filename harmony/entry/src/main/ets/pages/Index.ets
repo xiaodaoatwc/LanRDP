@@ -1,5 +1,11 @@
 import { image } from '@kit.ImageKit';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { connect, freerdpVersion, getFrame, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+
+interface ComboKey {
+  code: number;
+  extended: boolean;
+}
 
 @Entry
 @Component
@@ -24,6 +30,11 @@ struct Index {
   @State private shiftActive: boolean = false;
   @State private ctrlActive: boolean = false;
   @State private altActive: boolean = false;
+  @State private comboActive: boolean = false;
+  @State private inputFocused: boolean = false;
+  @State private viewOffsetY: number = 0;
+  private comboKeys: ComboKey[] = [];
+  private panLastY: number = 0;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -33,6 +44,10 @@ struct Index {
   private lastTouchY: number = 0;
   private lastWheelY: number = -1;
   private lastPanOffsetY: number = 0;
+
+  aboutToAppear(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+  }
 
   aboutToDisappear(): void {
     this.stopFrameTimer();
@@ -141,6 +156,16 @@ struct Index {
     }
 
     const touch = event.touches[0];
+    if (this.inputFocused) {
+      if (event.type === TouchType.Down) {
+        this.panLastY = touch.y;
+      } else if (event.type === TouchType.Move) {
+        const delta = touch.y - this.panLastY;
+        this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, this.viewOffsetY + delta));
+        this.panLastY = touch.y;
+      }
+      return;
+    }
     const previousX = this.lastTouchX;
     const previousY = this.lastTouchY;
     this.lastTouchX = touch.x;
@@ -214,7 +239,7 @@ struct Index {
       return;
     }
     const remoteX = Math.floor((x - left) / scale);
-    const remoteY = Math.floor((y - top) / scale);
+    const remoteY = Math.floor((y - this.viewOffsetY - top) / scale);
     sendMouse(remoteX, remoteY, button ?? this.mouseButton, down);
   }
 
@@ -259,7 +284,7 @@ struct Index {
       return;
     }
     const remoteX = Math.floor((x - left) / scale);
-    const remoteY = Math.floor((y - top) / scale);
+    const remoteY = Math.floor((y - this.viewOffsetY - top) / scale);
     sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
@@ -273,6 +298,18 @@ struct Index {
     this.mouseDown = false;
     this.longPressTriggered = false;
     this.status = '已断开';
+  }
+
+  private onInputFocus(): void {
+    this.inputFocused = true;
+    this.keyboardVisible = false;
+    this.adjustViewForInput();
+    this.panLastY = this.lastTouchY;
+  }
+
+  private onInputBlur(): void {
+    this.inputFocused = false;
+    this.viewOffsetY = 0;
   }
 
   private sendKeyboard(): void {
@@ -289,23 +326,27 @@ struct Index {
   }
 
   private pressKey(code: number, extended: boolean = false): void {
-    if (this.shiftActive)
-      sendKey(0x2A, true, false);
-    if (this.ctrlActive)
-      sendKey(0x1D, true, false);
-    if (this.altActive)
-      sendKey(0x38, true, false);
-
+    if (this.comboActive) {
+      sendKey(code, true, extended);
+      this.comboKeys.push({ code: code, extended: extended });
+      return;
+    }
     sendKey(code, true, extended);
     sendKey(code, false, extended);
+  }
 
-    if (this.altActive)
-      sendKey(0x38, false, false);
-    if (this.ctrlActive)
-      sendKey(0x1D, false, false);
-    if (this.shiftActive)
-      sendKey(0x2A, false, false);
-
+  private toggleCombo(): void {
+    if (!this.comboActive) {
+      this.comboActive = true;
+      this.comboKeys = [];
+      return;
+    }
+    for (let i = this.comboKeys.length - 1; i >= 0; i--) {
+      const key = this.comboKeys[i];
+      sendKey(key.code, false, key.extended);
+    }
+    this.comboKeys = [];
+    this.comboActive = false;
     this.shiftActive = false;
     this.ctrlActive = false;
     this.altActive = false;
@@ -331,292 +372,328 @@ struct Index {
       .backgroundColor(active ? '#2563EB' : '#E5E7EB')
       .fontColor(active ? '#FFFFFF' : '#111827')
       .onClick(() => {
-        if (code === 0x2A) {
-          this.shiftActive = !this.shiftActive;
-        } else if (code === 0x1D) {
-          this.ctrlActive = !this.ctrlActive;
-        } else if (code === 0x38) {
-          this.altActive = !this.altActive;
-        } else if (extended) {
-          sendKey(code, true, true);
-          sendKey(code, false, true);
+        if (this.comboActive) {
+          sendKey(code, true, extended);
+          this.comboKeys.push({ code: code, extended: extended });
+          if (code === 0x2A) {
+            this.shiftActive = true;
+          } else if (code === 0x1D) {
+            this.ctrlActive = true;
+          } else if (code === 0x38) {
+            this.altActive = true;
+          }
+        } else {
+          sendKey(code, true, extended);
+          sendKey(code, false, extended);
         }
       })
   }
 
+  private adjustViewForInput(): void {
+    if (this.lastTouchY <= 0 || this.imageViewHeight <= 0) {
+      return;
+    }
+    const keyboardHeight = this.imageViewHeight * 0.42;
+    const visibleHeight = Math.max(80, this.imageViewHeight - keyboardHeight);
+    const targetY = visibleHeight * 0.42;
+    const desired = targetY - this.lastTouchY;
+    this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, desired));
+  }
+
   build() {
-    Column({ space: 8 }) {
-      if (!this.connected) {
-        Text('LanRDP')
-          .fontSize(30)
-          .fontWeight(FontWeight.Bold)
-          .width('100%')
-
-        Text('HarmonyOS NEXT · 远程桌面')
-          .fontSize(13)
-          .fontColor('#6B7280')
-          .width('100%')
-
-        TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
-          .onChange((value: string) => {
-            this.host = value;
-          })
-          .width('100%')
-
-        Row({ space: 10 }) {
-          TextInput({ placeholder: '端口', text: this.portText })
-            .type(InputType.Number)
-            .onChange((value: string) => {
-              this.portText = value;
-            })
-            .layoutWeight(1)
-          TextInput({ placeholder: '用户名', text: this.username })
-            .onChange((value: string) => {
-              this.username = value;
-            })
-            .layoutWeight(2)
-        }
-        .width('100%')
-
-        Row({ space: 10 }) {
-          TextInput({ placeholder: '密码', text: this.password })
-            .type(InputType.Password)
-            .onChange((value: string) => {
-              this.password = value;
-            })
-            .layoutWeight(2)
-          TextInput({ placeholder: '域（可选）', text: this.domain })
-            .onChange((value: string) => {
-              this.domain = value;
-            })
-            .layoutWeight(1)
-        }
-        .width('100%')
-
-        Button(this.isConnecting ? '连接中…' : '连接')
-          .width('100%')
-          .enabled(!this.isConnecting)
-          .onClick(() => {
-            this.doConnect();
-          })
-
-        Text(this.status)
-          .fontSize(13)
-          .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
-          .width('100%')
-      } else {
-        Row({ space: 8 }) {
-          Text(this.host)
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column({ space: 8 }) {
+        if (!this.connected) {
+          Text('LanRDP')
+            .fontSize(30)
+            .fontWeight(FontWeight.Bold)
+            .width('100%')
+          Text('HarmonyOS NEXT · 远程桌面')
             .fontSize(13)
             .fontColor('#6B7280')
-            .layoutWeight(1)
-          Text(this.status)
-            .fontSize(12)
-            .fontColor('#6B7280')
-          Button('断开')
-            .fontSize(12)
-            .onClick(() => {
-              this.disconnect();
-            })
-        }
-        .width('100%')
-      }
+            .width('100%')
 
-      Row({ space: 8 }) {
-        Button('左键')
-          .onClick(() => {
-            this.mouseButton = 1;
-          })
-        Button('右键')
-          .onClick(() => {
-            this.mouseButton = 2;
-          })
-        Button('中键')
-          .onClick(() => {
-            this.mouseButton = 3;
-          })
-        Button('滚轮↑')
-          .onClick(() => {
-            sendWheel(120);
-          })
-        Button('滚轮↓')
-          .onClick(() => {
-            sendWheel(-120);
-          })
-      }
-      .width('100%')
-
-      if (this.frameImage !== null) {
-        Image(this.frameImage)
-          .width('100%')
-          .layoutWeight(1)
-          .objectFit(ImageFit.Contain)
-          .backgroundColor('#000000')
-          .borderRadius(8)
-          .onAreaChange((_oldValue: Area, newValue: Area) => {
-            this.imageViewWidth = Number(newValue.width);
-            this.imageViewHeight = Number(newValue.height);
-          })
-          .onTouch((event: TouchEvent) => {
-            this.handleTouch(event);
-          })
-          .onAxisEvent((event: AxisEvent) => {
-            const vertical = event.getVerticalAxisValue();
-            if (vertical !== 0) {
-              sendWheel(vertical > 0 ? -120 : 120);
-            }
-          })
-          .gesture(
-            GestureGroup(GestureMode.Parallel,
-              TapGesture({ count: 1, fingers: 2 })
-                .onAction((event: GestureEvent) => {
-                  if (event.fingerList.length > 0) {
-                    const finger = event.fingerList[0];
-                    this.sendMouseAt(finger.localX, finger.localY, true, 2);
-                    this.sendMouseAt(finger.localX, finger.localY, false, 2);
-                  }
-                }),
-              PanGesture({ fingers: 2, direction: PanDirection.Vertical, distance: 4 })
-                .onActionStart(() => {
-                  this.lastPanOffsetY = 0;
-                })
-                .onActionUpdate((event: GestureEvent) => {
-                  const delta = event.offsetY - this.lastPanOffsetY;
-                  if (Math.abs(delta) >= 10) {
-                    sendWheel(delta > 0 ? -120 : 120);
-                    this.lastPanOffsetY = event.offsetY;
-                  }
-                })
-            )
-          )
-      } else {
-        Column() {
-          Text(this.connected ? '等待远程画面…' : '连接后在此显示远程桌面')
-            .fontSize(14)
-            .fontColor('#9CA3AF')
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor(this.connected ? '#000000' : '#EEF1F6')
-        .borderRadius(8)
-      }
-
-      if (this.connected) {
-        Row({ space: 8 }) {
-          TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+          TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
             .onChange((value: string) => {
-              this.keyboardText = value;
+              this.host = value;
             })
-            .layoutWeight(1)
-          Button('发送')
+            .width('100%')
+
+          Row({ space: 10 }) {
+            TextInput({ placeholder: '端口', text: this.portText })
+              .type(InputType.Number)
+              .onChange((value: string) => {
+                this.portText = value;
+              })
+              .layoutWeight(1)
+            TextInput({ placeholder: '用户名', text: this.username })
+              .onChange((value: string) => {
+                this.username = value;
+              })
+              .layoutWeight(2)
+          }
+          .width('100%')
+
+          Row({ space: 10 }) {
+            TextInput({ placeholder: '密码', text: this.password })
+              .type(InputType.Password)
+              .onChange((value: string) => {
+                this.password = value;
+              })
+              .layoutWeight(2)
+            TextInput({ placeholder: '域（可选）', text: this.domain })
+              .onChange((value: string) => {
+                this.domain = value;
+              })
+              .layoutWeight(1)
+          }
+          .width('100%')
+
+          Button(this.isConnecting ? '连接中…' : '连接')
+            .width('100%')
+            .enabled(!this.isConnecting)
             .onClick(() => {
-              this.sendKeyboard();
+              this.doConnect();
             })
-          Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
-            .onClick(() => {
-              this.keyboardVisible = !this.keyboardVisible;
-            })
-        }
-        .width('100%')
 
-        if (this.keyboardVisible) {
-          Column({ space: 4 }) {
-            Row({ space: 4 }) {
-              this.Key('Esc', 0x01)
-              this.Key('1', 0x02)
-              this.Key('2', 0x03)
-              this.Key('3', 0x04)
-              this.Key('4', 0x05)
-              this.Key('5', 0x06)
-              this.Key('6', 0x07)
-              this.Key('7', 0x08)
-              this.Key('8', 0x09)
-              this.Key('9', 0x0A)
-              this.Key('0', 0x0B)
-              this.Key('-', 0x0C)
-              this.Key('=', 0x0D)
-              this.Key('Backspace', 0x0E, false, 2)
-            }
+          Text(this.status)
+            .fontSize(13)
+            .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
             .width('100%')
+        } else {
+          Row({ space: 8 }) {
+            Text(this.host)
+              .fontSize(13)
+              .fontColor('#6B7280')
+              .layoutWeight(1)
+            Text(this.status)
+              .fontSize(12)
+              .fontColor('#6B7280')
+            Button('断开')
+              .fontSize(12)
+              .onClick(() => {
+                this.disconnect();
+              })
+          }
+          .width('100%')
 
-            Row({ space: 4 }) {
-              this.Key('Tab', 0x0F, false, 2)
-              this.Key('Q', 0x10)
-              this.Key('W', 0x11)
-              this.Key('E', 0x12)
-              this.Key('R', 0x13)
-              this.Key('T', 0x14)
-              this.Key('Y', 0x15)
-              this.Key('U', 0x16)
-              this.Key('I', 0x17)
-              this.Key('O', 0x18)
-              this.Key('P', 0x19)
-              this.Key('[', 0x1A)
-              this.Key(']', 0x1B)
-              this.Key('\\', 0x2B)
-            }
-            .width('100%')
-
-            Row({ space: 4 }) {
-              this.Key('Caps', 0x3A, false, 2)
-              this.Key('A', 0x1E)
-              this.Key('S', 0x1F)
-              this.Key('D', 0x20)
-              this.Key('F', 0x21)
-              this.Key('G', 0x22)
-              this.Key('H', 0x23)
-              this.Key('J', 0x24)
-              this.Key('K', 0x25)
-              this.Key('L', 0x26)
-              this.Key(';', 0x27)
-              this.Key("'", 0x28)
-              this.Key('Enter', 0x1C, false, 2)
-            }
-            .width('100%')
-
-            Row({ space: 4 }) {
-              this.ModKey('Shift', 0x2A, this.shiftActive)
-              this.Key('Z', 0x2C)
-              this.Key('X', 0x2D)
-              this.Key('C', 0x2E)
-              this.Key('V', 0x2F)
-              this.Key('B', 0x30)
-              this.Key('N', 0x31)
-              this.Key('M', 0x32)
-              this.Key(',', 0x33)
-              this.Key('.', 0x34)
-              this.Key('/', 0x35)
-              this.ModKey('Shift', 0x36, this.shiftActive)
-            }
-            .width('100%')
-
-            Row({ space: 4 }) {
-              this.ModKey('Ctrl', 0x1D, this.ctrlActive)
-              this.Key('Win', 0x5B, true)
-              this.ModKey('Alt', 0x38, this.altActive)
-              this.Key('Space', 0x39, false, 5)
-              this.Key('←', 0x4B, true)
-              this.Key('↑', 0x48, true)
-              this.Key('↓', 0x50, true)
-              this.Key('→', 0x4D, true)
-              this.ModKey('Ctrl', 0x1D, this.ctrlActive)
-            }
-            .width('100%')
+          Row({ space: 8 }) {
+            TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+              .onChange((value: string) => {
+                this.keyboardText = value;
+              })
+              .onFocus(() => {
+                this.onInputFocus();
+              })
+              .onBlur(() => {
+                this.onInputBlur();
+              })
+              .layoutWeight(1)
+            Button('发送')
+              .onClick(() => {
+                this.sendKeyboard();
+              })
+            Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+              .onClick(() => {
+                this.inputFocused = false;
+                this.viewOffsetY = 0;
+                this.keyboardVisible = !this.keyboardVisible;
+              })
           }
           .width('100%')
         }
-      }
 
-      Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
-        .fontSize(11)
-        .fontColor('#9CA3AF')
+        Row({ space: 8 }) {
+          Button('左键').onClick(() => {
+            this.mouseButton = 1;
+          })
+          Button('右键').onClick(() => {
+            this.mouseButton = 2;
+          })
+          Button('中键').onClick(() => {
+            this.mouseButton = 3;
+          })
+          Button('滚轮↑').onClick(() => {
+            sendWheel(120);
+          })
+          Button('滚轮↓').onClick(() => {
+            sendWheel(-120);
+          })
+        }
         .width('100%')
+
+        if (this.frameImage !== null) {
+          Image(this.frameImage)
+            .width('100%')
+            .layoutWeight(1)
+            .objectFit(ImageFit.Contain)
+            .backgroundColor('#000000')
+            .borderRadius(8)
+            .translate({ y: this.viewOffsetY })
+            .onAreaChange((_oldValue: Area, newValue: Area) => {
+              this.imageViewWidth = Number(newValue.width);
+              this.imageViewHeight = Number(newValue.height);
+            })
+            .onTouch((event: TouchEvent) => {
+              this.handleTouch(event);
+            })
+            .onAxisEvent((event: AxisEvent) => {
+              const vertical = event.getVerticalAxisValue();
+              if (vertical !== 0) {
+                sendWheel(vertical > 0 ? -120 : 120);
+              }
+            })
+            .gesture(
+              GestureGroup(GestureMode.Parallel,
+                TapGesture({ count: 1, fingers: 2 })
+                  .onAction((event: GestureEvent) => {
+                    if (event.fingerList.length > 0) {
+                      const finger = event.fingerList[0];
+                      this.sendMouseAt(finger.localX, finger.localY, true, 2);
+                      this.sendMouseAt(finger.localX, finger.localY, false, 2);
+                    }
+                  }),
+                PanGesture({ fingers: 2, direction: PanDirection.Vertical, distance: 4 })
+                  .onActionStart(() => {
+                    this.lastPanOffsetY = 0;
+                  })
+                  .onActionUpdate((event: GestureEvent) => {
+                    const delta = event.offsetY - this.lastPanOffsetY;
+                    if (Math.abs(delta) >= 10) {
+                      sendWheel(delta > 0 ? -120 : 120);
+                      this.lastPanOffsetY = event.offsetY;
+                    }
+                  })
+              )
+            )
+        } else {
+          Column() {
+            Text(this.connected ? '等待远程画面…' : '连接后在此显示远程桌面')
+              .fontSize(14)
+              .fontColor('#9CA3AF')
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor(this.connected ? '#000000' : '#EEF1F6')
+          .borderRadius(8)
+        }
+
+        if (!this.connected) {
+          Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
+            .fontSize(11)
+            .fontColor('#9CA3AF')
+            .width('100%')
+        }
+      }
+      .padding(this.connected ? 8 : 20)
+      .width('100%')
+      .height('100%')
+      .alignItems(HorizontalAlign.Start)
+      .backgroundColor('#F7F9FC')
+
+      if (this.connected && this.keyboardVisible) {
+        Column({ space: 4 }) {
+          Row({ space: 4 }) {
+            this.Key('Esc', 0x01)
+            this.Key('1', 0x02)
+            this.Key('2', 0x03)
+            this.Key('3', 0x04)
+            this.Key('4', 0x05)
+            this.Key('5', 0x06)
+            this.Key('6', 0x07)
+            this.Key('7', 0x08)
+            this.Key('8', 0x09)
+            this.Key('9', 0x0A)
+            this.Key('0', 0x0B)
+            this.Key('-', 0x0C)
+            this.Key('=', 0x0D)
+            this.Key('Backspace', 0x0E, false, 2)
+            this.Key('Delete', 0x53, true)
+          }
+          .width('100%')
+
+          Row({ space: 4 }) {
+            this.Key('Tab', 0x0F, false, 2)
+            this.Key('Q', 0x10)
+            this.Key('W', 0x11)
+            this.Key('E', 0x12)
+            this.Key('R', 0x13)
+            this.Key('T', 0x14)
+            this.Key('Y', 0x15)
+            this.Key('U', 0x16)
+            this.Key('I', 0x17)
+            this.Key('O', 0x18)
+            this.Key('P', 0x19)
+            this.Key('[', 0x1A)
+            this.Key(']', 0x1B)
+            this.Key('\\', 0x2B)
+          }
+          .width('100%')
+
+          Row({ space: 4 }) {
+            this.Key('Caps', 0x3A, false, 2)
+            this.Key('A', 0x1E)
+            this.Key('S', 0x1F)
+            this.Key('D', 0x20)
+            this.Key('F', 0x21)
+            this.Key('G', 0x22)
+            this.Key('H', 0x23)
+            this.Key('J', 0x24)
+            this.Key('K', 0x25)
+            this.Key('L', 0x26)
+            this.Key(';', 0x27)
+            this.Key("'", 0x28)
+            this.Key('Enter', 0x1C, false, 2)
+          }
+          .width('100%')
+
+          Row({ space: 4 }) {
+            this.ModKey('Shift', 0x2A, this.shiftActive, false)
+            this.Key('Z', 0x2C)
+            this.Key('X', 0x2D)
+            this.Key('C', 0x2E)
+            this.Key('V', 0x2F)
+            this.Key('B', 0x30)
+            this.Key('N', 0x31)
+            this.Key('M', 0x32)
+            this.Key(',', 0x33)
+            this.Key('.', 0x34)
+            this.Key('/', 0x35)
+            this.ModKey('Shift', 0x36, this.shiftActive, false)
+            this.Key('↑', 0x48, true)
+          }
+          .width('100%')
+
+          Row({ space: 4 }) {
+            Button(this.comboActive ? '组合键•' : '组合键')
+              .fontSize(12)
+              .height(38)
+              .layoutWeight(2)
+              .backgroundColor(this.comboActive ? '#2563EB' : '#E5E7EB')
+              .fontColor(this.comboActive ? '#FFFFFF' : '#111827')
+              .onClick(() => {
+                this.toggleCombo();
+              })
+            this.ModKey('Ctrl', 0x1D, this.ctrlActive, false)
+            this.Key('Win', 0x5B, true)
+            this.ModKey('Alt', 0x38, this.altActive, false)
+            this.Key('Space', 0x39, false, 5)
+            this.ModKey('Alt', 0x38, this.altActive, false)
+            this.ModKey('Ctrl', 0x1D, this.ctrlActive, false)
+            this.Key('←', 0x4B, true)
+            this.Key('↓', 0x50, true)
+            this.Key('→', 0x4D, true)
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+        .backgroundColor('#F7F9FC')
+      }
     }
-    .padding(this.connected ? 8 : 20)
     .width('100%')
     .height('100%')
-    .alignItems(HorizontalAlign.Start)
     .backgroundColor('#F7F9FC')
   }
 }
