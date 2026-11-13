@@ -211,6 +211,9 @@ struct Index {
     }
 
     if (event.type === TouchType.Down) {
+      if (!this.inputFocused && !this.keyboardVisible) {
+        this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
+      }
       this.lastWheelY = -1;
       this.mouseDown = true;
       this.touchMoved = false;
@@ -511,12 +514,6 @@ struct Index {
             Text(this.status)
               .fontSize(12)
               .fontColor('#6B7280')
-            Button('直连键盘')
-              .fontSize(12)
-              .onClick(() => {
-                this.getUIContext().getFocusController().clearFocus();
-                this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
-              })
             Button('断开')
               .fontSize(12)
               .onClick(() => {
@@ -527,25 +524,6 @@ struct Index {
 
           .width('100%')
         }
-
-        Row({ space: 8 }) {
-          Button('左键').onClick(() => {
-            this.mouseButton = 1;
-          })
-          Button('右键').onClick(() => {
-            this.mouseButton = 2;
-          })
-          Button('中键').onClick(() => {
-            this.mouseButton = 3;
-          })
-          Button('滚轮↑').onClick(() => {
-            sendWheel(120);
-          })
-          Button('滚轮↓').onClick(() => {
-            sendWheel(-120);
-          })
-        }
-        .width('100%')
 
         if (this.frameImage !== null) {
           Image(this.frameImage)
@@ -643,6 +621,7 @@ struct Index {
         .width('100%')
         .padding({ left: 8, right: 8, top: 4, bottom: 4 })
         .backgroundColor('#F7F9FC')
+        .translate({ y: this.systemKeyboardHeight > 0 ? -px2vp(this.systemKeyboardHeight) + 20 : 0 })
       }
 
       if (this.connected && this.keyboardVisible) {
@@ -700,7 +679,7 @@ struct Index {
           .width('100%')
 
           Row({ space: 4 }) {
-            this.Key('Caps', 0x3A, false, 2)
+            this.Key('Caps', 0x3A, false, 1)
             this.Key('A', 0x1E)
             this.Key('S', 0x1F)
             this.Key('D', 0x20)
@@ -730,9 +709,8 @@ struct Index {
             this.Key('.', 0x34)
             this.Key('/', 0x35)
             this.ModKey('Shift', 0x36, this.shiftActive, false, 2)
-            Blank().layoutWeight(1)
             this.Key('↑', 0x48, true)
-            this.Key('PgDn', 0x51, true)
+            this.Key('PgDn', 0x51, true, 2)
           }
           .width('100%')
 
