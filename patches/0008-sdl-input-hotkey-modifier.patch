@@ -1,0 +1,35 @@
+--- a/client/SDL/SDL3/sdl_input.cpp
++++ b/client/SDL/SDL3/sdl_input.cpp
+@@ -447,12 +447,21 @@
+ 	str += ">";
+ 	return str;
+ }
++
++/* LanRDP: never use a lone shift key as the client shortcut modifier. FreeRDP defaults to
++ * KMOD_RSHIFT, which swallows ordinary typing on macOS: RShift+D disconnected the session,
++ * RShift+G/R toggled grab/resizable, RShift+M minimized, and the capital letters never
++ * reached the remote desktop. Use Ctrl+Alt instead, which is not part of regular text input.
++ * The mask is compared with (mods & mask) == mask, so list the concrete left-hand keys: the
++ * aggregate KMOD_CTRL/KMOD_ALT values contain both the left and right bit and never match. */
++static const std::vector<std::string> hotkey_default_modmask{ "KMOD_LCTRL", "KMOD_LALT" };
+ 
+ bool sdlInput::prefToEnabled()
+ {
+ 	bool enabled = true;
+ 	const auto& m = getSdlMap();
+-	for (const auto& val : SdlPref::instance()->get_array("SDL_KeyModMask", { "KMOD_RSHIFT" }))
++	const auto mask = SdlPref::instance()->get_array("SDL_KeyModMask", hotkey_default_modmask);
++	for (const auto& val : mask)
+ 	{
+ 		auto it = m.find(val);
+ 		if (it != m.end())
+@@ -475,7 +484,8 @@
+ {
+ 	const auto& m = getSdlMap();
+ 	uint32_t mod = SDL_KMOD_NONE;
+-	for (const auto& val : SdlPref::instance()->get_array("SDL_KeyModMask", { "KMOD_RSHIFT" }))
++	const auto mask = SdlPref::instance()->get_array("SDL_KeyModMask", hotkey_default_modmask);
++	for (const auto& val : mask)
+ 	{
+ 		auto it = m.find(val);
+ 		if (it != m.end())

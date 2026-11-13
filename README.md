@@ -6,6 +6,18 @@
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
 
+## 1.14.1 更新 / What's New
+
+### 中文
+
+- 修复右 Shift 组合键被客户端快捷键截获：右 Shift+D 会断开连接，右 Shift+G / 右 Shift+R 打不出大写字母，右 Shift+M 会最小化窗口。
+- 客户端快捷键的修饰键改为左 Ctrl + 左 Alt，正常输入大写字母不再被截获；全屏切换相应改为左 Ctrl + 左 Alt + Enter。
+
+### English
+
+- Fixed right Shift combinations being captured by the client shortcuts: right Shift+D disconnected the session, right Shift+G/R swallowed the capital letters, and right Shift+M minimized the window.
+- Client shortcuts now require left Ctrl + left Alt, so typing capital letters always reaches the remote desktop; the fullscreen toggle is left Ctrl + left Alt + Enter.
+
 ## 1.14 更新 / What's New
 
 ### 中文
