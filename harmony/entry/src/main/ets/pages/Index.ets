@@ -20,6 +20,10 @@ struct Index {
   @State private imageViewHeight: number = 0;
   @State private mouseButton: number = 1;
   @State private keyboardText: string = '';
+  @State private keyboardVisible: boolean = false;
+  @State private shiftActive: boolean = false;
+  @State private ctrlActive: boolean = false;
+  @State private altActive: boolean = false;
   private mouseDown: boolean = false;
   private timer: number = -1;
   private longPressTimer: number = -1;
@@ -284,6 +288,62 @@ struct Index {
     this.keyboardText = '';
   }
 
+  private pressKey(code: number, extended: boolean = false): void {
+    if (this.shiftActive)
+      sendKey(0x2A, true, false);
+    if (this.ctrlActive)
+      sendKey(0x1D, true, false);
+    if (this.altActive)
+      sendKey(0x38, true, false);
+
+    sendKey(code, true, extended);
+    sendKey(code, false, extended);
+
+    if (this.altActive)
+      sendKey(0x38, false, false);
+    if (this.ctrlActive)
+      sendKey(0x1D, false, false);
+    if (this.shiftActive)
+      sendKey(0x2A, false, false);
+
+    this.shiftActive = false;
+    this.ctrlActive = false;
+    this.altActive = false;
+  }
+
+  @Builder
+  Key(label: string, code: number, extended: boolean = false, weight: number = 1) {
+    Button(label)
+      .fontSize(12)
+      .height(38)
+      .layoutWeight(weight)
+      .onClick(() => {
+        this.pressKey(code, extended);
+      })
+  }
+
+  @Builder
+  ModKey(label: string, code: number, active: boolean, extended: boolean = false) {
+    Button(label)
+      .fontSize(12)
+      .height(38)
+      .layoutWeight(1)
+      .backgroundColor(active ? '#2563EB' : '#E5E7EB')
+      .fontColor(active ? '#FFFFFF' : '#111827')
+      .onClick(() => {
+        if (code === 0x2A) {
+          this.shiftActive = !this.shiftActive;
+        } else if (code === 0x1D) {
+          this.ctrlActive = !this.ctrlActive;
+        } else if (code === 0x38) {
+          this.altActive = !this.altActive;
+        } else if (extended) {
+          sendKey(code, true, true);
+          sendKey(code, false, true);
+        }
+      })
+  }
+
   build() {
     Column({ space: 8 }) {
       if (!this.connected) {
@@ -444,7 +504,7 @@ struct Index {
 
       if (this.connected) {
         Row({ space: 8 }) {
-          TextInput({ placeholder: '键盘输入', text: this.keyboardText })
+          TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
             .onChange((value: string) => {
               this.keyboardText = value;
             })
@@ -453,30 +513,99 @@ struct Index {
             .onClick(() => {
               this.sendKeyboard();
             })
+          Button(this.keyboardVisible ? '收起键盘' : '虚拟键盘')
+            .onClick(() => {
+              this.keyboardVisible = !this.keyboardVisible;
+            })
         }
         .width('100%')
 
-        Row({ space: 8 }) {
-          Button('Enter').onClick(() => {
-            this.tapKey(0x1C);
-          })
-          Button('Backspace').onClick(() => {
-            this.tapKey(0x0E);
-          })
-          Button('Esc').onClick(() => {
-            this.tapKey(0x01);
-          })
-          Button('Tab').onClick(() => {
-            this.tapKey(0x0F);
-          })
-        }
-        .width('100%')
+        if (this.keyboardVisible) {
+          Column({ space: 4 }) {
+            Row({ space: 4 }) {
+              this.Key('Esc', 0x01)
+              this.Key('1', 0x02)
+              this.Key('2', 0x03)
+              this.Key('3', 0x04)
+              this.Key('4', 0x05)
+              this.Key('5', 0x06)
+              this.Key('6', 0x07)
+              this.Key('7', 0x08)
+              this.Key('8', 0x09)
+              this.Key('9', 0x0A)
+              this.Key('0', 0x0B)
+              this.Key('-', 0x0C)
+              this.Key('=', 0x0D)
+              this.Key('Backspace', 0x0E, false, 2)
+            }
+            .width('100%')
 
-        TextInput({ placeholder: '电脑键盘输入（点此聚焦）' })
-          .onKeyEvent((event: KeyEvent) => {
-            this.handleHardwareKey(event);
-          })
+            Row({ space: 4 }) {
+              this.Key('Tab', 0x0F, false, 2)
+              this.Key('Q', 0x10)
+              this.Key('W', 0x11)
+              this.Key('E', 0x12)
+              this.Key('R', 0x13)
+              this.Key('T', 0x14)
+              this.Key('Y', 0x15)
+              this.Key('U', 0x16)
+              this.Key('I', 0x17)
+              this.Key('O', 0x18)
+              this.Key('P', 0x19)
+              this.Key('[', 0x1A)
+              this.Key(']', 0x1B)
+              this.Key('\\', 0x2B)
+            }
+            .width('100%')
+
+            Row({ space: 4 }) {
+              this.Key('Caps', 0x3A, false, 2)
+              this.Key('A', 0x1E)
+              this.Key('S', 0x1F)
+              this.Key('D', 0x20)
+              this.Key('F', 0x21)
+              this.Key('G', 0x22)
+              this.Key('H', 0x23)
+              this.Key('J', 0x24)
+              this.Key('K', 0x25)
+              this.Key('L', 0x26)
+              this.Key(';', 0x27)
+              this.Key("'", 0x28)
+              this.Key('Enter', 0x1C, false, 2)
+            }
+            .width('100%')
+
+            Row({ space: 4 }) {
+              this.ModKey('Shift', 0x2A, this.shiftActive)
+              this.Key('Z', 0x2C)
+              this.Key('X', 0x2D)
+              this.Key('C', 0x2E)
+              this.Key('V', 0x2F)
+              this.Key('B', 0x30)
+              this.Key('N', 0x31)
+              this.Key('M', 0x32)
+              this.Key(',', 0x33)
+              this.Key('.', 0x34)
+              this.Key('/', 0x35)
+              this.ModKey('Shift', 0x36, this.shiftActive)
+            }
+            .width('100%')
+
+            Row({ space: 4 }) {
+              this.ModKey('Ctrl', 0x1D, this.ctrlActive)
+              this.Key('Win', 0x5B, true)
+              this.ModKey('Alt', 0x38, this.altActive)
+              this.Key('Space', 0x39, false, 5)
+              this.Key('←', 0x4B, true)
+              this.Key('↑', 0x48, true)
+              this.Key('↓', 0x50, true)
+              this.Key('→', 0x4D, true)
+              this.ModKey('Ctrl', 0x1D, this.ctrlActive)
+            }
+            .width('100%')
+          }
           .width('100%')
+        }
       }
 
       Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
