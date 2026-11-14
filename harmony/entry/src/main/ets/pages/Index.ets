@@ -1144,10 +1144,7 @@ struct Index {
             this.lastNativeStatsAt = now;
             this.lastNativeVersion = info.version;
           }
-          const ackIndex = info.frameIndex;
-          setTimeout(() => {
-            ackFrame(ackIndex);
-          }, 16);
+          ackFrame(info.frameIndex);
         }
       }
       return;

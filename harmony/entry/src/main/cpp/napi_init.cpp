@@ -85,6 +85,9 @@ struct Session {
     int displayIndex = 0;
     bool nativeBound = false;
     double nativeWriteMs = 0;
+    bool pendingNativeFrame = false;
+    bool hasNativeFrameTime = false;
+    std::chrono::steady_clock::time_point lastNativeFrameTime;
     int width = 0;
     int height = 0;
     uint64_t version = 0;
@@ -100,6 +103,13 @@ struct SessionContext {
 
 static std::mutex g_sessionMutex;
 static Session* g_session = nullptr;
+
+static Session* SessionFromContext(rdpContext* context)
+{
+    auto* sessionContext = reinterpret_cast<SessionContext*>(context);
+    return sessionContext ? sessionContext->session : nullptr;
+}
+
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
 
 static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
@@ -130,6 +140,8 @@ static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
     session->frameIndex = 0;
     session->writeIndex = 1;
     session->displayIndex = 0;
+    session->pendingNativeFrame = false;
+    session->hasNativeFrameTime = false;
     session->nativeBound = false;
 }
 
@@ -150,8 +162,7 @@ static BOOL SessionBeginPaint(rdpContext* context)
 
 static BOOL SessionEndPaint(rdpContext* context)
 {
-    auto* sessionContext = reinterpret_cast<SessionContext*>(context);
-    Session* session = sessionContext ? sessionContext->session : nullptr;
+    Session* session = SessionFromContext(context);
     if (!session)
         return TRUE;
 
@@ -168,42 +179,13 @@ static BOOL SessionEndPaint(rdpContext* context)
 
     const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
+    session->width = width;
+    session->height = height;
     if (session->nativeBound) {
-        int targetIndex = -1;
-        for (int i = 0; i < 3; ++i) {
-            if (i != session->displayIndex && i != session->frameIndex) {
-                targetIndex = i;
-                break;
-            }
-        }
-        if (targetIndex < 0) {
-            targetIndex = (session->displayIndex + 1) % 3;
-        }
-        NativePixelMap* target = targetIndex == 0 ? session->frontNative :
-            (targetIndex == 1 ? session->backNative : session->extraNative);
-        const int targetStride = targetIndex == 0 ? session->frontStride :
-            (targetIndex == 1 ? session->backStride : session->extraStride);
-        if (target && targetStride >= width * 4 &&
-            session->width == width && session->height == height) {
-            void* targetPixels = nullptr;
-            if (OH_PixelMap_AccessPixels(target, &targetPixels) == 0 && targetPixels) {
-                const auto writeStart = std::chrono::steady_clock::now();
-                const BOOL copied = freerdp_image_copy(
-                    static_cast<BYTE*>(targetPixels), PIXEL_FORMAT_BGRA32,
-                    static_cast<UINT32>(targetStride),
-                    0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
-                    source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
-                OH_PixelMap_UnAccessPixels(target);
-                const auto writeEnd = std::chrono::steady_clock::now();
-                session->nativeWriteMs = std::chrono::duration<double, std::milli>(writeEnd - writeStart).count();
-                if (copied) {
-                    session->frameIndex = targetIndex;
-                    ++session->version;
-                    return TRUE;
-                }
-            }
-        }
+        session->pendingNativeFrame = true;
+        return TRUE;
     }
+
     session->pixels.resize(static_cast<size_t>(width) * height * 4);
     const BOOL converted = freerdp_image_copy(
         session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
@@ -211,11 +193,74 @@ static BOOL SessionEndPaint(rdpContext* context)
         source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
     if (!converted)
         return TRUE;
-
-    session->width = width;
-    session->height = height;
     ++session->version;
     return TRUE;
+}
+
+static void FlushNativeFrame(Session* session)
+{
+    if (!session)
+        return;
+    std::lock_guard<std::mutex> lock(session->mutex);
+    if (!session->nativeBound || !session->pendingNativeFrame) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (session->hasNativeFrameTime &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - session->lastNativeFrameTime).count() < 8) {
+        return;
+    }
+    SessionContext* sessionContext = reinterpret_cast<SessionContext*>(session->context);
+    rdpContext* context = sessionContext ? &sessionContext->context : session->context;
+    rdpGdi* gdi = context ? context->gdi : nullptr;
+    if (!gdi || !gdi->primary_buffer || gdi->width <= 0 || gdi->height <= 0) {
+        return;
+    }
+    const int width = gdi->width;
+    const int height = gdi->height;
+    const UINT32 stride = gdi->stride;
+    const UINT32 format = gdi->dstFormat;
+    if (session->width != width || session->height != height || stride < static_cast<UINT32>(width * 4)) {
+        return;
+    }
+    int targetIndex = -1;
+    for (int i = 0; i < 3; ++i) {
+        if (i != session->displayIndex && i != session->frameIndex) {
+            targetIndex = i;
+            break;
+        }
+    }
+    if (targetIndex < 0) {
+        targetIndex = (session->displayIndex + 1) % 3;
+    }
+    NativePixelMap* target = targetIndex == 0 ? session->frontNative :
+        (targetIndex == 1 ? session->backNative : session->extraNative);
+    const int targetStride = targetIndex == 0 ? session->frontStride :
+        (targetIndex == 1 ? session->backStride : session->extraStride);
+    if (!target || targetStride < width * 4) {
+        return;
+    }
+    void* targetPixels = nullptr;
+    if (OH_PixelMap_AccessPixels(target, &targetPixels) != 0 || !targetPixels) {
+        return;
+    }
+    const auto writeStart = std::chrono::steady_clock::now();
+    const BOOL copied = freerdp_image_copy(
+        static_cast<BYTE*>(targetPixels), PIXEL_FORMAT_BGRA32,
+        static_cast<UINT32>(targetStride),
+        0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+        gdi->primary_buffer, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+    OH_PixelMap_UnAccessPixels(target);
+    const auto writeEnd = std::chrono::steady_clock::now();
+    session->nativeWriteMs = std::chrono::duration<double, std::milli>(writeEnd - writeStart).count();
+    if (!copied) {
+        return;
+    }
+    session->frameIndex = targetIndex;
+    session->pendingNativeFrame = false;
+    session->hasNativeFrameTime = true;
+    session->lastNativeFrameTime = writeEnd;
+    ++session->version;
 }
 
 static BOOL SessionDesktopResize(rdpContext* context)
@@ -231,11 +276,14 @@ static void SessionLoop(Session* session)
         DWORD count = freerdp_get_event_handles(session->context, handles, 64);
         if (count == 0)
             break;
-        DWORD status = WaitForMultipleObjects(count, handles, FALSE, 100);
+        DWORD status = WaitForMultipleObjects(count, handles, FALSE, 8);
         if (status == WAIT_FAILED)
             break;
-        if (!freerdp_check_event_handles(session->context))
-            break;
+        if (status != WAIT_TIMEOUT) {
+            if (!freerdp_check_event_handles(session->context))
+                break;
+        }
+        FlushNativeFrame(session);
     }
 
     if (!session->stop.load()) {
@@ -644,6 +692,8 @@ static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
     session->frameIndex = 0;
     session->writeIndex = 1;
     session->displayIndex = 0;
+    session->pendingNativeFrame = false;
+    session->hasNativeFrameTime = false;
     session->nativeBound = true;
     napi_get_boolean(env, true, &result);
     return result;
