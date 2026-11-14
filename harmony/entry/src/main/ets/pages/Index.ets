@@ -1132,6 +1132,10 @@ struct Index {
     const touch = event.touches[0];
     const touchX = touch.windowX - this.imageGlobalX;
     const touchY = touch.windowY - this.imageGlobalY;
+    if (this.twoFingerActive && (event.type === TouchType.Up || event.type === TouchType.Cancel)) {
+      this.finishTwoFingerGesture();
+      return;
+    }
     if (this.moveMode) {
       if (event.type === TouchType.Down) {
         this.panLastY = touchY;
@@ -1150,6 +1154,12 @@ struct Index {
     const previousY = this.lastTouchY;
     this.lastTouchX = touchX;
     this.lastTouchY = touchY;
+
+    if (event.touches.length === 1 && event.type === TouchType.Down && this.twoFingerActive) {
+      this.twoFingerActive = false;
+      this.twoFingerTapCandidate = false;
+      this.twoFingerScroll = false;
+    }
 
     if (event.touches.length >= 2) {
       this.cancelLongPress();
@@ -1182,6 +1192,9 @@ struct Index {
     }
 
     if (this.twoFingerActive) {
+      if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.finishTwoFingerGesture();
+      }
       return;
     }
 
