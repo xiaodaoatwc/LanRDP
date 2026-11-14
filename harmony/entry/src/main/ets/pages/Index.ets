@@ -51,9 +51,14 @@ struct Index {
   @State private savedConnections: SavedConnection[] = [];
   @State private selectedConnectionIndex: number = 0;
   @State private selectedConnectionId: string = '';
+  @State private homeSection: number = 0;
+  @State private showEditor: boolean = false;
+  @State private editorName: string = '';
+  @State private searchText: string = '';
   @State private renamingProfile: boolean = false;
   @State private renameText: string = '';
   private loadingSettings: boolean = false;
+  private profilesInitialized: boolean = false;
   private applyingProfile: boolean = false;
   @State private status: string = `FreeRDP ${freerdpVersion()}`;
   @State private isConnecting: boolean = false;
@@ -117,7 +122,11 @@ struct Index {
         this.systemKeyboardHeight = height;
       });
     });
-    this.loadSavedSettings();
+    this.loadSavedSettings().then(() => {
+      if (!this.profilesInitialized && this.savedConnections.length === 0 && this.host.length > 0) {
+        this.saveCurrentProfile(false);
+      }
+    });
   }
 
   onPageShow(): void {
@@ -259,6 +268,7 @@ struct Index {
       const remember = Boolean(await pref.get('savePassword', false));
       const rawProfiles = String(await pref.get('connections', ''));
       if (rawProfiles.length > 0) {
+        this.profilesInitialized = true;
         try {
           const parsed = JSON.parse(rawProfiles) as SavedConnection[];
           if (Array.isArray(parsed)) {
@@ -399,6 +409,91 @@ struct Index {
     return profile.port.length > 0 && profile.port !== '3389' ? `${name}:${profile.port}` : name;
   }
 
+  private filteredConnections(): SavedConnection[] {
+    const query = this.searchText.trim().toLowerCase();
+    if (query.length === 0) {
+      return this.savedConnections;
+    }
+    return this.savedConnections.filter((profile: SavedConnection) => {
+      return this.connectionLabel(profile).toLowerCase().includes(query) ||
+        profile.host.toLowerCase().includes(query) ||
+        profile.username.toLowerCase().includes(query);
+    });
+  }
+
+  private connectionLoginLabel(profile: SavedConnection): string {
+    return profile.username.length > 0 ? profile.username : '直接输入';
+  }
+
+  private connectionDisplayLabel(profile: SavedConnection): string {
+    const resolutions: string[] = [
+      '自动', '1024×768', '1280×800', '1440×900', '1600×900', '1920×1080'
+    ];
+    const scales: string[] = ['100%', '125%', '150%', '175%', '200%'];
+    const resolution = profile.resolutionPreset >= 0 && profile.resolutionPreset < resolutions.length
+      ? resolutions[profile.resolutionPreset] : resolutions[0];
+    const scaleIndex = profile.scalePreset !== undefined ? profile.scalePreset : 0;
+    const scale = scaleIndex >= 0 && scaleIndex < scales.length ? scales[scaleIndex] : scales[0];
+    return `${resolution} · ${scale}`;
+  }
+
+  private startAddConnection(): void {
+    this.editorName = '';
+    this.selectedConnectionId = '';
+    this.selectedConnectionIndex = 0;
+    this.host = '';
+    this.portText = '3389';
+    this.username = '';
+    this.password = '';
+    this.domain = '';
+    this.savePassword = false;
+    this.resolutionPreset = 0;
+    this.scalePreset = 0;
+    this.homeSection = 0;
+    this.showEditor = true;
+    this.status = '新连接';
+  }
+
+  private async startEditConnection(profile: SavedConnection): Promise<void> {
+    await this.applyProfile(profile);
+    this.showEditor = true;
+  }
+
+  private async saveEditor(connectAfter: boolean): Promise<void> {
+    if (this.host.trim().length === 0) {
+      promptAction.showToast({ message: '请先填写主机名或 IP' });
+      return;
+    }
+    await this.saveCurrentProfile(false);
+    this.showEditor = false;
+    this.homeSection = 0;
+    if (connectAfter) {
+      await this.doConnect();
+      if (!this.connected) {
+        this.showEditor = true;
+      }
+    }
+  }
+
+  private async connectConnection(profile: SavedConnection): Promise<void> {
+    await this.applyProfile(profile);
+    if (this.password.length === 0) {
+      this.showEditor = true;
+      this.status = '请输入密码';
+      return;
+    }
+    this.showEditor = false;
+    await this.doConnect();
+  }
+
+  private async deleteConnection(profile: SavedConnection): Promise<void> {
+    this.selectedConnectionId = profile.id;
+    await this.deleteSelectedProfile();
+    if (this.showEditor && this.selectedConnectionId.length === 0) {
+      this.showEditor = false;
+    }
+  }
+
   private async startRename(): Promise<void> {
     if (this.selectedConnectionId.length === 0) {
       await this.saveCurrentProfile(false);
@@ -468,6 +563,7 @@ struct Index {
     this.applyingProfile = true;
     try {
       this.selectedConnectionId = profile.id;
+      this.editorName = profile.name !== undefined ? profile.name : '';
       this.host = profile.host;
       this.portText = profile.port.length > 0 ? profile.port : '3389';
       this.username = profile.username;
@@ -532,7 +628,7 @@ struct Index {
     const existingName = index >= 0 ? this.savedConnections[index].name : undefined;
     const profile: SavedConnection = {
       id: id,
-      name: existingName,
+      name: this.editorName.trim().length > 0 ? this.editorName.trim() : existingName,
       host: host,
       port: this.portText.trim(),
       username: this.username.trim(),
@@ -1373,194 +1469,602 @@ struct Index {
     this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, desired));
   }
 
-  build() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column({ space: 8 }) {
-        if (!this.connected) {
-          Text('LanRDP')
-            .fontSize(30)
-            .fontWeight(FontWeight.Bold)
-            .width('100%')
-          Text('HarmonyOS NEXT · 远程桌面')
-            .fontSize(13)
-            .fontColor('#6B7280')
-            .width('100%')
+  @Builder
+  SidebarRow(icon: string, label: string, section: number) {
+    Row({ space: 10 }) {
+      Text(icon)
+        .fontSize(15)
+      Text(label)
+        .fontSize(14)
+        .fontColor(this.homeSection === section ? '#0A84FF' : '#1C1C1E')
+      Blank()
+      if (section === 0) {
+        Text(String(this.savedConnections.length))
+          .fontSize(11)
+          .fontColor('#8E8E93')
+      }
+    }
+    .width('100%')
+    .height(38)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.homeSection === section && !this.showEditor ? '#0A84FF14' : Color.Transparent)
+    .borderRadius(8)
+    .onClick(() => {
+      this.homeSection = section;
+      this.showEditor = false;
+    })
+  }
 
-          Row({ space: 8 }) {
-            Text('记录')
-              .fontSize(13)
-              .fontColor('#6B7280')
-            Select(this.connectionOptions())
-              .selected(this.selectedConnectionIndex)
-              .value(this.selectedConnectionLabel())
-              .font({ size: 13 })
-              .layoutWeight(1)
-              .onSelect((index: number, value: string) => {
-                this.selectedConnectionIndex = index;
-                if (index > 0 && index <= this.savedConnections.length) {
-                  this.applyProfile(this.savedConnections[index - 1]);
-                } else {
-                  this.selectedConnectionId = '';
-                }
-              })
-            Button('保存')
-              .fontSize(12)
-              .height(36)
-              .onClick(() => {
-                this.saveCurrentProfile(true);
-              })
-            Button('改名')
-              .fontSize(12)
-              .height(36)
-              .onClick(() => {
-                this.startRename();
-              })
-            Button('删除')
-              .fontSize(12)
-              .height(36)
-              .onClick(() => {
-                this.deleteSelectedProfile();
-              })
+  @Builder
+  Sidebar() {
+    Column() {
+      Column({ space: 3 }) {
+        Text('LanRDP')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1C1C1E')
+        Text('HarmonyOS NEXT · 远程桌面')
+          .fontSize(11)
+          .fontColor('#8E8E93')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 22, bottom: 18 })
+
+      Text('电脑')
+        .fontSize(11)
+        .fontColor('#8E8E93')
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 6 })
+
+      this.SidebarRow('🖥', '所有电脑', 0)
+
+      Blank()
+
+      Divider()
+        .color('#D1D1D6')
+      this.SidebarRow('⚙', '设置', 1)
+
+      Button('＋ 添加 PC')
+        .width('100%')
+        .height(38)
+        .fontSize(13)
+        .fontColor('#0A84FF')
+        .backgroundColor(Color.Transparent)
+        .borderRadius(8)
+        .margin({ left: 8, right: 8, bottom: 12 })
+        .onClick(() => {
+          this.startAddConnection();
+        })
+    }
+    .width(230)
+    .height('100%')
+    .backgroundColor('#F2F2F7')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  FormField(label: string, placeholder: string, value: string, onChange: (value: string) => void, password: boolean = false) {
+    Column({ space: 6 }) {
+      Text(label)
+        .fontSize(11)
+        .fontColor('#6B7280')
+      TextInput({ placeholder: placeholder, text: value })
+        .type(password ? InputType.Password : InputType.Normal)
+        .height(40)
+        .fontSize(13)
+        .backgroundColor('#F7F7FA')
+        .borderRadius(8)
+        .onChange((input: string) => {
+          onChange(input);
+        })
+        .width('100%')
+    }
+    .alignItems(HorizontalAlign.Start)
+    .width('100%')
+  }
+
+  @Builder
+  ConnectionCard(profile: SavedConnection) {
+    Column({ space: 12 }) {
+      Row({ space: 12 }) {
+        Stack() {
+          Text('🖥')
+            .fontSize(22)
+        }
+        .width(46)
+        .height(46)
+        .borderRadius(12)
+        .backgroundColor('#EAF2FF')
+
+        Column({ space: 2 }) {
+          Text(this.connectionLabel(profile))
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#1C1C1E')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`${profile.host}:${profile.port}`)
+            .fontSize(11)
+            .fontColor('#8E8E93')
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Button('编辑')
+          .fontSize(10)
+          .height(26)
+          .fontColor('#0A84FF')
+          .backgroundColor('#F2F2F7')
+          .onClick(() => {
+            this.startEditConnection(profile);
+          })
+        Button('删除')
+          .fontSize(10)
+          .height(26)
+          .fontColor('#FF3B30')
+          .backgroundColor('#F2F2F7')
+          .onClick(() => {
+            this.deleteConnection(profile);
+          })
+      }
+      .width('100%')
+
+      Row({ space: 8 }) {
+        Text('未分组')
+          .fontSize(10)
+          .fontColor('#6B7280')
+          .backgroundColor('#F2F2F7')
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .borderRadius(4)
+        Text(this.connectionLoginLabel(profile))
+          .fontSize(10)
+          .fontColor('#6B7280')
+        Blank()
+        Text(this.connectionDisplayLabel(profile))
+          .fontSize(10)
+          .fontColor('#8E8E93')
+      }
+      .width('100%')
+
+      Row() {
+        Button('连接')
+          .fontSize(12)
+          .height(32)
+          .backgroundColor('#0A84FF')
+          .fontColor(Color.White)
+          .onClick(() => {
+            this.connectConnection(profile);
+          })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.End)
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor(Color.White)
+    .borderRadius(16)
+    .border({
+      width: this.selectedConnectionId === profile.id ? 2 : 1,
+      color: this.selectedConnectionId === profile.id ? '#0A84FF' : '#00000010'
+    })
+    .onClick(() => {
+      this.selectedConnectionId = profile.id;
+    })
+  }
+
+  @Builder
+  HomePage() {
+    Column() {
+      Row() {
+        Column({ space: 4 }) {
+          Text('所有电脑')
+            .fontSize(28)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#1C1C1E')
+          Text(`${this.savedConnections.length} 台电脑 · 局域网 / 广域网远程桌面`)
+            .fontSize(13)
+            .fontColor('#8E8E93')
+        }
+        .alignItems(HorizontalAlign.Start)
+        Blank()
+        Button('＋ 添加 PC')
+          .fontSize(13)
+          .height(38)
+          .backgroundColor('#0A84FF')
+          .fontColor(Color.White)
+          .onClick(() => {
+            this.startAddConnection();
+          })
+      }
+      .width('100%')
+      .padding({ left: 24, right: 24, top: 22, bottom: 14 })
+
+      Row() {
+        TextInput({ placeholder: '搜索电脑', text: this.searchText })
+          .height(38)
+          .width(300)
+          .fontSize(13)
+          .backgroundColor(Color.White)
+          .borderRadius(10)
+          .onChange((value: string) => {
+            this.searchText = value;
+          })
+      }
+      .width('100%')
+      .padding({ left: 24, right: 24, bottom: 14 })
+
+      if (this.savedConnections.length === 0) {
+        Column({ space: 12 }) {
+          Text('🖥')
+            .fontSize(44)
+          Text('还没有电脑')
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+          Text('添加一台 Windows 电脑，开始局域网远程桌面。')
+            .fontSize(12)
+            .fontColor('#8E8E93')
+          Button('添加第一台 PC')
+            .fontSize(13)
+            .backgroundColor('#0A84FF')
+            .fontColor(Color.White)
+            .onClick(() => {
+              this.startAddConnection();
+            })
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+      } else if (this.filteredConnections().length === 0) {
+        Column({ space: 8 }) {
+          Text('没有匹配的电脑')
+            .fontSize(16)
+          Text('换个名称、IP 或用户名试试。')
+            .fontSize(12)
+            .fontColor('#8E8E93')
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Grid() {
+          ForEach(this.filteredConnections(), (profile: SavedConnection) => {
+            GridItem() {
+              this.ConnectionCard(profile)
+            }
+          }, (profile: SavedConnection) => profile.id)
+        }
+        .columnsTemplate('1fr 1fr')
+        .columnsGap(16)
+        .rowsGap(16)
+        .layoutWeight(1)
+        .width('100%')
+        .padding({ left: 24, right: 24, bottom: 16 })
+      }
+
+      if (this.status.includes('失败') || this.status.includes('断开') || this.status.includes('请输入')) {
+        Text(this.status)
+          .fontSize(12)
+          .fontColor('#FF3B30')
+          .padding({ left: 24, right: 24, bottom: 12 })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F2F2F7')
+  }
+
+  @Builder
+  SettingsPage() {
+    Column() {
+      Text('设置')
+        .fontSize(28)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#1C1C1E')
+        .width('100%')
+        .padding({ left: 24, right: 24, top: 22, bottom: 4 })
+      Text('默认显示与关于信息')
+        .fontSize(13)
+        .fontColor('#8E8E93')
+        .width('100%')
+        .padding({ left: 24, right: 24, bottom: 14 })
+
+      Scroll() {
+        Column({ space: 16 }) {
+          Column({ space: 12 }) {
+            Text('默认显示')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .width('100%')
+            Row({ space: 8 }) {
+              Text('分辨率')
+                .fontSize(13)
+                .fontColor('#6B7280')
+                .width(64)
+              Select([
+                { value: '自动（推荐）' },
+                { value: '1024×768' },
+                { value: '1280×800' },
+                { value: '1440×900' },
+                { value: '1600×900' },
+                { value: '1920×1080' }
+              ])
+                .selected(this.resolutionPreset)
+                .value(this.resolutionLabel())
+                .font({ size: 13 })
+                .layoutWeight(1)
+                .onSelect((index: number) => {
+                  this.resolutionPreset = index;
+                })
+            }
+            .width('100%')
+            Row({ space: 8 }) {
+              Text('缩放')
+                .fontSize(13)
+                .fontColor('#6B7280')
+                .width(64)
+              Select([
+                { value: '100%（推荐）' },
+                { value: '125%' },
+                { value: '150%' },
+                { value: '175%' },
+                { value: '200%' }
+              ])
+                .selected(this.scalePreset)
+                .value(this.scaleLabel())
+                .font({ size: 13 })
+                .layoutWeight(1)
+                .onSelect((index: number) => {
+                  this.scalePreset = index;
+                })
+            }
+            .width('100%')
+            Text('新建连接时使用这些默认值。')
+              .fontSize(11)
+              .fontColor('#8E8E93')
+              .width('100%')
           }
           .width('100%')
+          .padding(18)
+          .backgroundColor(Color.White)
+          .borderRadius(16)
+          .border({ width: 1, color: '#00000010' })
 
-          if (this.renamingProfile) {
+          Column({ space: 8 }) {
+            Text('关于')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .width('100%')
+            Text('LanRDP HarmonyOS 0.1.0')
+              .fontSize(12)
+            Text(`FreeRDP ${freerdpVersion()}`)
+              .fontSize(12)
+            Text('密码保存在系统 Asset Store；主机信息保存在 Preferences。')
+              .fontSize(11)
+              .fontColor('#8E8E93')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .width('100%')
+          .padding(18)
+          .backgroundColor(Color.White)
+          .borderRadius(16)
+          .border({ width: 1, color: '#00000010' })
+        }
+        .width('100%')
+        .padding({ left: 24, right: 24, bottom: 20 })
+      }
+      .layoutWeight(1)
+      .width('100%')
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F2F2F7')
+  }
+
+  @Builder
+  EditorPage() {
+    Column() {
+      Row() {
+        Column({ space: 3 }) {
+          Text(this.selectedConnectionId.length > 0 ? '编辑 PC' : '添加 PC')
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#1C1C1E')
+          Text('远程桌面连接信息')
+            .fontSize(12)
+            .fontColor('#8E8E93')
+        }
+        .alignItems(HorizontalAlign.Start)
+        Blank()
+        Button('取消')
+          .fontSize(12)
+          .onClick(() => {
+            this.showEditor = false;
+          })
+      }
+      .width('100%')
+      .padding({ left: 24, right: 24, top: 22, bottom: 14 })
+
+      Scroll() {
+        Column({ space: 16 }) {
+          Column({ space: 12 }) {
+            Text('常规')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .width('100%')
+            this.FormField('名称', '例如：办公室电脑', this.editorName, (value: string) => {
+              this.editorName = value;
+            })
+            this.FormField('主机名或 IP', '192.0.2.10', this.host, (value: string) => {
+              this.host = value;
+            })
+            Row({ space: 12 }) {
+              Column() {
+                this.FormField('端口', '3389', this.portText, (value: string) => {
+                  this.portText = value;
+                })
+              }
+              .layoutWeight(1)
+              Column() {
+                this.FormField('用户名', 'Windows 用户名', this.username, (value: string) => {
+                  this.username = value;
+                })
+              }
+              .layoutWeight(2)
+            }
+            .width('100%')
+            this.FormField('域（可选）', '例如 DESKTOP-ABC', this.domain, (value: string) => {
+              this.domain = value;
+            })
+            this.FormField('密码', '密码', this.password, (value: string) => {
+              this.password = value;
+            }, true)
             Row({ space: 8 }) {
-              TextInput({ placeholder: '连接名称', text: this.renameText })
-                .onChange((value: string) => {
-                  this.renameText = value;
+              Toggle({ type: ToggleType.Switch, isOn: this.savePassword })
+                .onChange((isOn: boolean) => {
+                  this.savePassword = isOn;
                 })
-                .height(36)
+              Text('记住密码')
+                .fontSize(13)
+                .fontColor('#374151')
+              Text('系统 Asset Store 加密保存')
+                .fontSize(11)
+                .fontColor('#9CA3AF')
                 .layoutWeight(1)
-              Button('确定')
-                .fontSize(12)
-                .height(36)
-                .onClick(() => {
-                  this.confirmRename();
+            }
+            .width('100%')
+          }
+          .width('100%')
+          .padding(18)
+          .backgroundColor(Color.White)
+          .borderRadius(16)
+          .border({ width: 1, color: '#00000010' })
+
+          Column({ space: 12 }) {
+            Text('显示')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .width('100%')
+            Row({ space: 8 }) {
+              Text('分辨率')
+                .fontSize(13)
+                .fontColor('#6B7280')
+                .width(64)
+              Select([
+                { value: '自动（推荐）' },
+                { value: '1024×768' },
+                { value: '1280×800' },
+                { value: '1440×900' },
+                { value: '1600×900' },
+                { value: '1920×1080' }
+              ])
+                .selected(this.resolutionPreset)
+                .value(this.resolutionLabel())
+                .font({ size: 13 })
+                .layoutWeight(1)
+                .onSelect((index: number) => {
+                  this.resolutionPreset = index;
                 })
-              Button('取消')
-                .fontSize(12)
-                .height(36)
-                .onClick(() => {
-                  this.cancelRename();
+            }
+            .width('100%')
+            Row({ space: 8 }) {
+              Text('缩放')
+                .fontSize(13)
+                .fontColor('#6B7280')
+                .width(64)
+              Select([
+                { value: '100%（推荐）' },
+                { value: '125%' },
+                { value: '150%' },
+                { value: '175%' },
+                { value: '200%' }
+              ])
+                .selected(this.scalePreset)
+                .value(this.scaleLabel())
+                .font({ size: 13 })
+                .layoutWeight(1)
+                .onSelect((index: number) => {
+                  this.scalePreset = index;
                 })
             }
             .width('100%')
           }
-
-          TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
-            .onChange((value: string) => {
-              this.host = value;
-            })
-            .width('100%')
-
-          Row({ space: 10 }) {
-            TextInput({ placeholder: '端口', text: this.portText })
-              .type(InputType.Number)
-              .onChange((value: string) => {
-                this.portText = value;
-              })
-              .layoutWeight(1)
-            TextInput({ placeholder: '用户名', text: this.username })
-              .onChange((value: string) => {
-                this.username = value;
-              })
-              .layoutWeight(2)
-          }
           .width('100%')
-
-          Row({ space: 10 }) {
-            TextInput({ placeholder: '密码', text: this.password })
-              .type(InputType.Password)
-              .onChange((value: string) => {
-                this.password = value;
-              })
-              .layoutWeight(2)
-            TextInput({ placeholder: '域（可选）', text: this.domain })
-              .onChange((value: string) => {
-                this.domain = value;
-              })
-              .layoutWeight(1)
-          }
-          .width('100%')
-
-          Row({ space: 8 }) {
-            Toggle({ type: ToggleType.Switch, isOn: this.savePassword })
-              .onChange((isOn: boolean) => {
-                this.savePassword = isOn;
-                if (!this.loadingSettings && !this.applyingProfile) {
-                  this.saveConnectionSettings();
-                  if (this.selectedConnectionId.length > 0) {
-                    this.saveCurrentProfile();
-                  }
-                }
-              })
-            Text('记住密码')
-              .fontSize(13)
-              .fontColor('#374151')
-            Text('系统 Asset Store 加密保存')
-              .fontSize(11)
-              .fontColor('#9CA3AF')
-              .layoutWeight(1)
-          }
-          .width('100%')
-
-          Row({ space: 8 }) {
-            Text('分辨率')
-              .fontSize(13)
-              .fontColor('#6B7280')
-              .width(64)
-            Select([
-              { value: '自动（推荐）' },
-              { value: '1024×768' },
-              { value: '1280×800' },
-              { value: '1440×900' },
-              { value: '1600×900' },
-              { value: '1920×1080' }
-            ])
-              .selected(this.resolutionPreset)
-              .value(this.resolutionLabel())
-              .font({ size: 13 })
-              .layoutWeight(1)
-              .onSelect((index: number, value: string) => {
-                this.resolutionPreset = index;
-              })
-          }
-          .width('100%')
-
-          Row({ space: 8 }) {
-            Text('缩放')
-              .fontSize(13)
-              .fontColor('#6B7280')
-              .width(64)
-            Select([
-              { value: '100%（推荐）' },
-              { value: '125%' },
-              { value: '150%' },
-              { value: '175%' },
-              { value: '200%' }
-            ])
-              .selected(this.scalePreset)
-              .value(this.scaleLabel())
-              .font({ size: 13 })
-              .layoutWeight(1)
-              .onSelect((index: number, value: string) => {
-                this.scalePreset = index;
-              })
-          }
-          .width('100%')
-
-          Button(this.isConnecting ? '连接中…' : '连接')
-            .width('100%')
-            .enabled(!this.isConnecting)
-            .onClick(() => {
-              this.doConnect();
-            })
+          .padding(18)
+          .backgroundColor(Color.White)
+          .borderRadius(16)
+          .border({ width: 1, color: '#00000010' })
 
           Text(this.status)
-            .fontSize(13)
-            .fontColor(this.status.includes('失败') ? '#B91C1C' : '#6B7280')
+            .fontSize(12)
+            .fontColor(this.status.includes('失败') ? '#FF3B30' : '#8E8E93')
             .width('100%')
+        }
+        .width('100%')
+        .constraintSize({ maxWidth: 720 })
+        .padding({ left: 24, right: 24, bottom: 20 })
+        .alignItems(HorizontalAlign.Start)
+      }
+      .layoutWeight(1)
+      .width('100%')
+
+      Row({ space: 10 }) {
+        Button('取消')
+          .fontSize(13)
+          .onClick(() => {
+            this.showEditor = false;
+          })
+        Blank()
+        Button('保存')
+          .fontSize(13)
+          .onClick(() => {
+            this.saveEditor(false);
+          })
+        Button('保存并连接')
+          .fontSize(13)
+          .backgroundColor('#0A84FF')
+          .fontColor(Color.White)
+          .onClick(() => {
+            this.saveEditor(true);
+          })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: 720 })
+      .padding({ left: 24, right: 24, top: 12, bottom: 20 })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F2F2F7')
+  }
+
+  @Builder
+  HomeShell() {
+    Row() {
+      this.Sidebar()
+      Column() {
+        if (this.showEditor) {
+          this.EditorPage()
+        } else if (this.homeSection === 1) {
+          this.SettingsPage()
+        } else {
+          this.HomePage()
+        }
+      }
+      .layoutWeight(1)
+      .height('100%')
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F2F2F7')
+  }
+
+  build() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column({ space: 8 }) {
+
+
+        if (!this.connected) {
+          this.HomeShell()
         } else {
           Row({ space: 8 }) {
             Text(this.host)
@@ -1687,18 +2191,12 @@ struct Index {
             .height(64)
         }
 
-        if (!this.connected) {
-          Text(`native ${version()} · FreeRDP ${freerdpVersion()}`)
-            .fontSize(11)
-            .fontColor('#9CA3AF')
-            .width('100%')
-        }
       }
-      .padding(this.connected ? 8 : 20)
+      .padding(this.connected ? 8 : 0)
       .width('100%')
       .height('100%')
       .alignItems(HorizontalAlign.Start)
-      .backgroundColor('#F7F9FC')
+      .backgroundColor(this.connected ? '#F7F9FC' : '#F2F2F7')
 
       if (this.connected) {
         Row({ space: 4 }) {
