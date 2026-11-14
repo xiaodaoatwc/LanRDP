@@ -1,6 +1,7 @@
 import { image } from '@kit.ImageKit';
 import { inputMethod } from '@kit.IMEKit';
 import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
+import { displaySync } from '@kit.ArkGraphics2D';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
@@ -132,6 +133,7 @@ struct Index {
   private shiftGraceTimer: number = -1;
   private mouseDown: boolean = false;
   private timer: number = -1;
+  private displaySyncHandle: displaySync.DisplaySync | null = null;
   private frameBusy: boolean = false;
   private fpsFrames: number = 0;
   private fpsStart: number = 0;
@@ -208,9 +210,44 @@ struct Index {
   }
 
   private stopFrameTimer(): void {
+    if (this.displaySyncHandle !== null) {
+      try {
+        this.displaySyncHandle.stop();
+        this.displaySyncHandle.off('frame');
+      } catch (error) {
+        console.info(`LanRDP stop display sync failed: ${String(error)}`);
+      }
+      this.displaySyncHandle = null;
+    }
     if (this.timer >= 0) {
       clearInterval(this.timer);
       this.timer = -1;
+    }
+  }
+
+  private startFrameLoop(): void {
+    this.stopFrameTimer();
+    try {
+      let refreshRate = 60;
+      try {
+        refreshRate = display.getDefaultDisplaySync().refreshRate;
+      } catch (error) {
+        console.info(`LanRDP read refresh rate failed: ${String(error)}`);
+      }
+      const expected = Math.max(30, Math.min(60, refreshRate > 0 ? refreshRate : 60));
+      const maxRate = Math.max(expected, refreshRate > 0 ? refreshRate : 60);
+      const sync = displaySync.create();
+      sync.setExpectedFrameRateRange({ min: 30, max: maxRate, expected: expected });
+      sync.on('frame', () => {
+        this.refreshFrame();
+      });
+      sync.start();
+      this.displaySyncHandle = sync;
+    } catch (error) {
+      console.info(`LanRDP display sync failed: ${String(error)}`);
+      this.timer = setInterval(() => {
+        this.refreshFrame();
+      }, 16);
     }
   }
 
@@ -1072,9 +1109,7 @@ struct Index {
         setTimeout(() => {
           this.focusRemoteKeyboard();
         }, 50);
-        this.timer = setInterval(() => {
-          this.refreshFrame();
-        }, 16);
+        this.startFrameLoop();
         this.saveConnectionSettings();
         this.saveCurrentProfile();
       } else {
