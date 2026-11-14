@@ -130,7 +130,7 @@ struct Index {
   }
 
   onPageShow(): void {
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+    this.getUIContext().setKeyboardAvoidMode(this.showEditor ? KeyboardAvoidMode.RESIZE : KeyboardAvoidMode.NONE);
     if (this.connected) {
       setTimeout(() => {
         this.focusRemoteKeyboard();
@@ -160,6 +160,19 @@ struct Index {
       clearInterval(this.timer);
       this.timer = -1;
     }
+  }
+
+  private setEditorKeyboardMode(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+  }
+
+  private setRemoteKeyboardMode(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+  }
+
+  private closeEditor(): void {
+    this.showEditor = false;
+    this.setRemoteKeyboardMode();
   }
 
   private focusRemoteKeyboard(): void {
@@ -451,12 +464,14 @@ struct Index {
     this.scalePreset = 0;
     this.homeSection = 0;
     this.showEditor = true;
+    this.setEditorKeyboardMode();
     this.status = '新连接';
   }
 
   private async startEditConnection(profile: SavedConnection): Promise<void> {
     await this.applyProfile(profile);
     this.showEditor = true;
+    this.setEditorKeyboardMode();
   }
 
   private async saveEditor(connectAfter: boolean): Promise<void> {
@@ -464,13 +479,19 @@ struct Index {
       promptAction.showToast({ message: '请先填写主机名或 IP' });
       return;
     }
+    if (connectAfter && this.password.length === 0) {
+      this.status = '请输入密码';
+      promptAction.showToast({ message: '请输入密码' });
+      return;
+    }
     await this.saveCurrentProfile(false);
-    this.showEditor = false;
+    this.closeEditor();
     this.homeSection = 0;
     if (connectAfter) {
       await this.doConnect();
       if (!this.connected) {
         this.showEditor = true;
+        this.setEditorKeyboardMode();
       }
     }
   }
@@ -479,11 +500,16 @@ struct Index {
     await this.applyProfile(profile);
     if (this.password.length === 0) {
       this.showEditor = true;
+      this.setEditorKeyboardMode();
       this.status = '请输入密码';
+      promptAction.showToast({ message: '请输入密码' });
       return;
     }
-    this.showEditor = false;
+    this.closeEditor();
     await this.doConnect();
+    if (!this.connected) {
+      promptAction.showToast({ message: this.status });
+    }
   }
 
   private async deleteConnection(profile: SavedConnection): Promise<void> {
@@ -700,6 +726,7 @@ struct Index {
     this.status = '连接中…';
     const desktop = this.resolutionSize();
     const scale = this.scaleValues();
+    console.info(`LanRDP connect start ${host}:${port} size=${desktop.width}x${desktop.height} scale=${scale.desktop} hasPassword=${this.password.length > 0}`);
 
     try {
       const result = await connect(
@@ -714,6 +741,7 @@ struct Index {
         scale.device
       );
       if (result === 'connected') {
+        console.info('LanRDP connect ok');
         this.connected = true;
         this.status = '连接成功，等待画面…';
         setTimeout(() => {
@@ -725,10 +753,13 @@ struct Index {
         this.saveConnectionSettings();
         this.saveCurrentProfile();
       } else {
-        this.status = result;
+        const detail = result.startsWith('failed: ') ? result.substring(8) : result;
+        this.status = result.startsWith('failed') ? `连接失败：${detail}` : result;
+        console.info(`LanRDP connect failed: ${result}`);
       }
     } catch (error) {
       this.status = `连接失败：${String(error)}`;
+      console.info(`LanRDP connect error: ${String(error)}`);
     } finally {
       this.isConnecting = false;
     }
@@ -1491,7 +1522,7 @@ struct Index {
     .borderRadius(8)
     .onClick(() => {
       this.homeSection = section;
-      this.showEditor = false;
+      this.closeEditor();
     })
   }
 
@@ -1742,7 +1773,7 @@ struct Index {
         .padding({ left: 24, right: 24, bottom: 16 })
       }
 
-      if (this.status.includes('失败') || this.status.includes('断开') || this.status.includes('请输入')) {
+      if (this.status.includes('失败') || this.status.includes('failed') || this.status.includes('断开') || this.status.includes('请输入')) {
         Text(this.status)
           .fontSize(12)
           .fontColor('#FF3B30')
@@ -1879,7 +1910,7 @@ struct Index {
         Button('取消')
           .fontSize(12)
           .onClick(() => {
-            this.showEditor = false;
+            this.closeEditor();
           })
       }
       .width('100%')
@@ -2012,7 +2043,7 @@ struct Index {
         Button('取消')
           .fontSize(13)
           .onClick(() => {
-            this.showEditor = false;
+            this.closeEditor();
           })
         Blank()
         Button('保存')
