@@ -1356,17 +1356,30 @@ struct Index {
     }
   }
 
+  private baseDisplayScale(): number {
+    if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
+        this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
+      return 0;
+    }
+    return Math.min(this.imageViewWidth / this.frameWidth,
+      this.imageViewHeight / this.frameHeight);
+  }
+
+  private displayImageWidth(): number {
+    return this.frameWidth * this.baseDisplayScale() * this.viewScale;
+  }
+
+  private displayImageHeight(): number {
+    return this.frameHeight * this.baseDisplayScale() * this.viewScale;
+  }
+
   private clampViewOffsets(): void {
     if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
         this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
       return;
     }
-    const base = Math.min(this.imageViewWidth / this.frameWidth,
-      this.imageViewHeight / this.frameHeight);
-    const drawW = this.frameWidth * base * this.viewScale;
-    const drawH = this.frameHeight * base * this.viewScale;
-    const maxX = Math.max(0, (drawW - this.imageViewWidth / this.viewScale) / 2);
-    const maxY = Math.max(0, (drawH - this.imageViewHeight / this.viewScale) / 2);
+    const maxX = Math.max(0, (this.displayImageWidth() - this.imageViewWidth) / 2);
+    const maxY = Math.max(0, (this.displayImageHeight() - this.imageViewHeight) / 2);
     this.viewOffsetX = Math.max(-maxX, Math.min(maxX, this.viewOffsetX));
     this.viewOffsetY = Math.max(-maxY, Math.min(maxY, this.viewOffsetY));
   }
@@ -1376,18 +1389,19 @@ struct Index {
         this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
       return;
     }
-    const scale = Math.min(this.imageViewWidth / this.frameWidth, this.imageViewHeight / this.frameHeight);
-    const drawWidth = this.frameWidth * scale;
-    const drawHeight = this.frameHeight * scale;
-    const left = (this.imageViewWidth - drawWidth) / 2;
-    const top = (this.imageViewHeight - drawHeight) / 2;
+    const base = this.baseDisplayScale();
+    if (base <= 0) {
+      return;
+    }
+    const drawWidth = this.displayImageWidth();
+    const drawHeight = this.displayImageHeight();
+    const left = (this.imageViewWidth - drawWidth) / 2 + this.viewOffsetX;
+    const top = (this.imageViewHeight - drawHeight) / 2 + this.viewOffsetY;
     if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
       return;
     }
-    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2 - this.viewOffsetX;
-    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2 - this.viewOffsetY;
-    const remoteX = Math.floor((scaledX - left) / scale);
-    const remoteY = Math.floor((scaledY - top) / scale);
+    const remoteX = Math.floor((x - left) / (base * this.viewScale));
+    const remoteY = Math.floor((y - top) / (base * this.viewScale));
     sendMouse(remoteX, remoteY, button ?? this.mouseButton, down);
   }
 
@@ -1746,18 +1760,19 @@ struct Index {
         this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
       return;
     }
-    const scale = Math.min(this.imageViewWidth / this.frameWidth, this.imageViewHeight / this.frameHeight);
-    const drawWidth = this.frameWidth * scale;
-    const drawHeight = this.frameHeight * scale;
-    const left = (this.imageViewWidth - drawWidth) / 2;
-    const top = (this.imageViewHeight - drawHeight) / 2;
+    const base = this.baseDisplayScale();
+    if (base <= 0) {
+      return;
+    }
+    const drawWidth = this.displayImageWidth();
+    const drawHeight = this.displayImageHeight();
+    const left = (this.imageViewWidth - drawWidth) / 2 + this.viewOffsetX;
+    const top = (this.imageViewHeight - drawHeight) / 2 + this.viewOffsetY;
     if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
       return;
     }
-    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2 - this.viewOffsetX;
-    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2 - this.viewOffsetY;
-    const remoteX = Math.floor((scaledX - left) / scale);
-    const remoteY = Math.floor((scaledY - top) / scale);
+    const remoteX = Math.floor((x - left) / (base * this.viewScale));
+    const remoteY = Math.floor((y - top) / (base * this.viewScale));
     sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
@@ -2916,17 +2931,22 @@ struct Index {
         }
 
         if (this.frameImage !== null) {
-          Image(this.frameImage)
-            .width('100%')
-            .layoutWeight(1)
-            .objectFit(ImageFit.Contain)
-            .draggable(false)
-            .enableAnalyzer(false)
-            .backgroundColor('#F2F2F7')
-            .borderRadius(this.isFullscreen ? 0 : 8)
-            .translate({ x: this.viewOffsetX, y: this.viewOffsetY })
-            .scale({ x: this.viewScale, y: this.viewScale })
-            .onAreaChange((_oldValue: Area, newValue: Area) => {
+          Stack({ alignContent: Alignment.Center }) {
+            Image(this.frameImage)
+              .width(this.displayImageWidth())
+              .height(this.displayImageHeight())
+              .objectFit(ImageFit.Fill)
+              .draggable(false)
+              .enableAnalyzer(false)
+              .backgroundColor(Color.Transparent)
+              .offset({ x: this.viewOffsetX, y: this.viewOffsetY })
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .clip(true)
+          .backgroundColor('#F2F2F7')
+          .borderRadius(this.isFullscreen ? 0 : 8)
+          .onAreaChange((_oldValue: Area, newValue: Area) => {
               this.imageViewWidth = Number(newValue.width);
               this.imageViewHeight = Number(newValue.height);
               this.imageGlobalX = Number(newValue.globalPosition.x);
@@ -3011,11 +3031,13 @@ struct Index {
                     const newScale = Math.max(0.8, Math.min(2,
                       this.pinchAnchorScale * (ratio / this.pinchAnchorRatio)));
                     if (newScale !== oldScale) {
+                      const ratio = newScale / oldScale;
                       const centerX = this.imageViewWidth / 2;
                       const centerY = this.imageViewHeight / 2;
-                      const factor = 1 / newScale - 1 / oldScale;
-                      this.viewOffsetX += (this.pinchFocalX - centerX) * factor;
-                      this.viewOffsetY += (this.pinchFocalY - centerY) * factor;
+                      this.viewOffsetX = this.viewOffsetX * ratio +
+                        (this.pinchFocalX - centerX) * (1 - ratio);
+                      this.viewOffsetY = this.viewOffsetY * ratio +
+                        (this.pinchFocalY - centerY) * (1 - ratio);
                       this.viewScale = newScale;
                       this.clampViewOffsets();
                     }
