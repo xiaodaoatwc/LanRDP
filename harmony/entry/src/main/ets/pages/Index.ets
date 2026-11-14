@@ -1027,7 +1027,7 @@ struct Index {
         }, 50);
         this.timer = setInterval(() => {
           this.refreshFrame();
-        }, 200);
+        }, 33);
         this.saveConnectionSettings();
         this.saveCurrentProfile();
       } else {
@@ -1213,6 +1213,7 @@ struct Index {
         this.twoFingerStartY = averageY;
         this.twoFingerTapX = this.firstFingerX;
         this.twoFingerTapY = this.firstFingerY;
+        this.sendMouseMoveAt(this.firstFingerX, this.firstFingerY, 0);
       }
       this.twoFingerLastX = averageX;
       this.twoFingerLastY = averageY;
