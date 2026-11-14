@@ -4,12 +4,10 @@
 #include <freerdp/settings.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
-#include <freerdp/update.h>
 #include "multimedia/image_framework/image_pixel_map_mdk.h"
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
 
-#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -73,16 +71,15 @@ struct Session {
     std::mutex mutex;
     std::vector<uint8_t> pixels;
     napi_env frameEnv = nullptr;
-    napi_ref mapRefs[3] = { nullptr, nullptr, nullptr };
-    NativePixelMap* nativeMaps[3] = { nullptr, nullptr, nullptr };
-    int mapStrides[3] = { 0, 0, 0 };
-    int displayIndex = 0;
+    napi_ref frontRef = nullptr;
+    napi_ref backRef = nullptr;
+    NativePixelMap* frontNative = nullptr;
+    NativePixelMap* backNative = nullptr;
+    int frontStride = 0;
+    int backStride = 0;
     int frameIndex = 0;
+    int writeIndex = 1;
     bool nativeBound = false;
-    std::vector<uint8_t> pendingTiles;
-    int tilesX = 0;
-    int tilesY = 0;
-    bool fullFrame = true;
     int width = 0;
     int height = 0;
     uint64_t version = 0;
@@ -100,128 +97,27 @@ static std::mutex g_sessionMutex;
 static Session* g_session = nullptr;
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
 
-static constexpr int kTileSize = 64;
-
-static Session* SessionFromContext(rdpContext* context)
-{
-    auto* sessionContext = reinterpret_cast<SessionContext*>(context);
-    return sessionContext ? sessionContext->session : nullptr;
-}
-
-static void EnsureDirtyGrid(Session* session)
-{
-    if (!session || session->width <= 0 || session->height <= 0)
-        return;
-    const int tilesX = (session->width + kTileSize - 1) / kTileSize;
-    const int tilesY = (session->height + kTileSize - 1) / kTileSize;
-    const size_t count = static_cast<size_t>(tilesX) * tilesY;
-    if (session->tilesX != tilesX || session->tilesY != tilesY ||
-        session->pendingTiles.size() != count) {
-        session->tilesX = tilesX;
-        session->tilesY = tilesY;
-        session->pendingTiles.assign(count, 0);
-        session->fullFrame = true;
-    }
-}
-
-static void MarkDirtyLocked(Session* session, int x, int y, int width, int height)
-{
-    if (!session || width <= 0 || height <= 0)
-        return;
-    EnsureDirtyGrid(session);
-    if (session->tilesX <= 0 || session->tilesY <= 0)
-        return;
-    const int left = std::max(0, x);
-    const int top = std::max(0, y);
-    const int right = std::min(session->width, x + width);
-    const int bottom = std::min(session->height, y + height);
-    if (right <= left || bottom <= top)
-        return;
-    for (int ty = top / kTileSize; ty <= (bottom - 1) / kTileSize; ++ty) {
-        for (int tx = left / kTileSize; tx <= (right - 1) / kTileSize; ++tx) {
-            session->pendingTiles[static_cast<size_t>(ty) * session->tilesX + tx] = 1;
-        }
-    }
-}
-
-static void MarkDirty(Session* session, int x, int y, int width, int height)
-{
-    if (!session)
-        return;
-    std::lock_guard<std::mutex> lock(session->mutex);
-    MarkDirtyLocked(session, x, y, width, height);
-}
-
-static void MarkAllDirty(Session* session)
-{
-    if (!session)
-        return;
-    std::lock_guard<std::mutex> lock(session->mutex);
-    EnsureDirtyGrid(session);
-    session->fullFrame = true;
-    std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 1);
-}
-
-static pBitmapUpdate g_originalBitmapUpdate = nullptr;
-static pSurfaceBits g_originalSurfaceBits = nullptr;
-static pRefreshRect g_originalRefreshRect = nullptr;
-
-static BOOL SessionBitmapUpdate(rdpContext* context, const BITMAP_UPDATE* bitmap)
-{
-    const BOOL result = g_originalBitmapUpdate ? g_originalBitmapUpdate(context, bitmap) : TRUE;
-    Session* session = SessionFromContext(context);
-    if (session && bitmap) {
-        for (UINT32 i = 0; i < bitmap->number; ++i) {
-            const BITMAP_DATA& data = bitmap->rectangles[i];
-            MarkDirty(session, static_cast<int>(data.destLeft), static_cast<int>(data.destTop),
-                      static_cast<int>(data.width), static_cast<int>(data.height));
-        }
-    }
-    return result;
-}
-
-static BOOL SessionSurfaceBits(rdpContext* context, const SURFACE_BITS_COMMAND* command)
-{
-    const BOOL result = g_originalSurfaceBits ? g_originalSurfaceBits(context, command) : TRUE;
-    Session* session = SessionFromContext(context);
-    if (session && command) {
-        MarkDirty(session, static_cast<int>(command->destLeft), static_cast<int>(command->destTop),
-                  static_cast<int>(command->destRight) - static_cast<int>(command->destLeft),
-                  static_cast<int>(command->destBottom) - static_cast<int>(command->destTop));
-    }
-    return result;
-}
-
-static BOOL SessionRefreshRect(rdpContext* context, BYTE count, const RECTANGLE_16* areas)
-{
-    const BOOL result = g_originalRefreshRect ? g_originalRefreshRect(context, count, areas) : TRUE;
-    Session* session = SessionFromContext(context);
-    if (session && areas) {
-        for (BYTE i = 0; i < count; ++i) {
-            const RECTANGLE_16& area = areas[i];
-            MarkDirty(session, static_cast<int>(area.left), static_cast<int>(area.top),
-                      static_cast<int>(area.right) - static_cast<int>(area.left),
-                      static_cast<int>(area.bottom) - static_cast<int>(area.top));
-        }
-    }
-    return result;
-}
-
 static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
 {
     if (!session)
         return;
     napi_env useEnv = env ? env : session->frameEnv;
-    for (int i = 0; i < 3; ++i) {
-        if (useEnv && session->mapRefs[i]) {
-            napi_delete_reference(useEnv, session->mapRefs[i]);
+    if (useEnv) {
+        if (session->frontRef) {
+            napi_delete_reference(useEnv, session->frontRef);
+            session->frontRef = nullptr;
         }
-        session->mapRefs[i] = nullptr;
-        session->nativeMaps[i] = nullptr;
-        session->mapStrides[i] = 0;
+        if (session->backRef) {
+            napi_delete_reference(useEnv, session->backRef);
+            session->backRef = nullptr;
+        }
     }
-    session->displayIndex = 0;
+    session->frontNative = nullptr;
+    session->backNative = nullptr;
+    session->frontStride = 0;
+    session->backStride = 0;
     session->frameIndex = 0;
+    session->writeIndex = 1;
     session->nativeBound = false;
 }
 
@@ -242,7 +138,8 @@ static BOOL SessionBeginPaint(rdpContext* context)
 
 static BOOL SessionEndPaint(rdpContext* context)
 {
-    Session* session = SessionFromContext(context);
+    auto* sessionContext = reinterpret_cast<SessionContext*>(context);
+    Session* session = sessionContext ? sessionContext->session : nullptr;
     if (!session)
         return TRUE;
 
@@ -259,102 +156,29 @@ static BOOL SessionEndPaint(rdpContext* context)
 
     const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
-    const bool sizeChanged = session->width != width || session->height != height;
-    session->width = width;
-    session->height = height;
-    EnsureDirtyGrid(session);
-    if (sizeChanged) {
-        session->fullFrame = true;
-    }
-
     if (session->nativeBound) {
-        const int first = (session->displayIndex + 1) % 3;
-        const int second = (session->displayIndex + 2) % 3;
-        NativePixelMap* mapA = session->nativeMaps[first];
-        NativePixelMap* mapB = session->nativeMaps[second];
-        const int strideA = session->mapStrides[first];
-        const int strideB = session->mapStrides[second];
-        if (mapA && mapB && strideA >= width * 4 && strideB >= width * 4) {
-            void* pixelsA = nullptr;
-            void* pixelsB = nullptr;
-            const bool aOk = OH_PixelMap_AccessPixels(mapA, &pixelsA) == 0 && pixelsA;
-            const bool bOk = OH_PixelMap_AccessPixels(mapB, &pixelsB) == 0 && pixelsB;
-            if (aOk && bOk) {
-                bool anyDirty = session->fullFrame;
-                if (session->fullFrame) {
-                    const BOOL copyA = freerdp_image_copy(
-                        static_cast<BYTE*>(pixelsA), PIXEL_FORMAT_BGRA32,
-                        static_cast<UINT32>(strideA), 0, 0,
-                        static_cast<UINT32>(width), static_cast<UINT32>(height),
-                        source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
-                    const BOOL copyB = freerdp_image_copy(
-                        static_cast<BYTE*>(pixelsB), PIXEL_FORMAT_BGRA32,
-                        static_cast<UINT32>(strideB), 0, 0,
-                        static_cast<UINT32>(width), static_cast<UINT32>(height),
-                        source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
-                    anyDirty = copyA && copyB;
-                    session->fullFrame = false;
-                    std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 0);
-                } else {
-                    for (size_t i = 0; i < session->pendingTiles.size(); ++i) {
-                        if (!session->pendingTiles[i])
-                            continue;
-                        anyDirty = true;
-                        const int tx = static_cast<int>(i) % session->tilesX;
-                        const int ty = static_cast<int>(i) / session->tilesX;
-                        const int x = tx * kTileSize;
-                        const int y = ty * kTileSize;
-                        const int tileWidth = std::min(kTileSize, width - x);
-                        const int tileHeight = std::min(kTileSize, height - y);
-                        if (format == PIXEL_FORMAT_BGRA32) {
-                            const BYTE* src = source + static_cast<size_t>(y) * stride +
-                                static_cast<size_t>(x) * 4;
-                            BYTE* dstA = static_cast<BYTE*>(pixelsA) +
-                                static_cast<size_t>(y) * strideA + static_cast<size_t>(x) * 4;
-                            BYTE* dstB = static_cast<BYTE*>(pixelsB) +
-                                static_cast<size_t>(y) * strideB + static_cast<size_t>(x) * 4;
-                            for (int row = 0; row < tileHeight; ++row) {
-                                std::memcpy(dstA + static_cast<size_t>(row) * strideA,
-                                            src + static_cast<size_t>(row) * stride,
-                                            static_cast<size_t>(tileWidth) * 4);
-                                std::memcpy(dstB + static_cast<size_t>(row) * strideB,
-                                            src + static_cast<size_t>(row) * stride,
-                                            static_cast<size_t>(tileWidth) * 4);
-                            }
-                        } else {
-                            freerdp_image_copy(
-                                static_cast<BYTE*>(pixelsA), PIXEL_FORMAT_BGRA32,
-                                static_cast<UINT32>(strideA), x, y,
-                                static_cast<UINT32>(tileWidth), static_cast<UINT32>(tileHeight),
-                                source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
-                            freerdp_image_copy(
-                                static_cast<BYTE*>(pixelsB), PIXEL_FORMAT_BGRA32,
-                                static_cast<UINT32>(strideB), x, y,
-                                static_cast<UINT32>(tileWidth), static_cast<UINT32>(tileHeight),
-                                source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
-                        }
-                    }
-                    std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 0);
-                }
-                OH_PixelMap_UnAccessPixels(mapA);
-                OH_PixelMap_UnAccessPixels(mapB);
-                if (anyDirty) {
-                    session->frameIndex = first;
-                    session->displayIndex = first;
+        const bool useFront = session->writeIndex == 0;
+        NativePixelMap* target = useFront ? session->frontNative : session->backNative;
+        const int targetStride = useFront ? session->frontStride : session->backStride;
+        if (target && targetStride >= width * 4 &&
+            session->width == width && session->height == height) {
+            void* targetPixels = nullptr;
+            if (OH_PixelMap_AccessPixels(target, &targetPixels) == 0 && targetPixels) {
+                const BOOL copied = freerdp_image_copy(
+                    static_cast<BYTE*>(targetPixels), PIXEL_FORMAT_BGRA32,
+                    static_cast<UINT32>(targetStride),
+                    0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+                    source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+                OH_PixelMap_UnAccessPixels(target);
+                if (copied) {
+                    session->frameIndex = session->writeIndex;
+                    session->writeIndex = 1 - session->writeIndex;
                     ++session->version;
+                    return TRUE;
                 }
-                return TRUE;
-            }
-            if (aOk) {
-                OH_PixelMap_UnAccessPixels(mapA);
-            }
-            if (bOk) {
-                OH_PixelMap_UnAccessPixels(mapB);
             }
         }
-        session->nativeBound = false;
     }
-
     session->pixels.resize(static_cast<size_t>(width) * height * 4);
     const BOOL converted = freerdp_image_copy(
         session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
@@ -363,18 +187,15 @@ static BOOL SessionEndPaint(rdpContext* context)
     if (!converted)
         return TRUE;
 
-    session->fullFrame = false;
-    std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 0);
+    session->width = width;
+    session->height = height;
     ++session->version;
     return TRUE;
 }
 
 static BOOL SessionDesktopResize(rdpContext* context)
 {
-    Session* session = SessionFromContext(context);
-    if (session) {
-        MarkAllDirty(session);
-    }
+    (void)context;
     return TRUE;
 }
 
@@ -430,16 +251,9 @@ static BOOL SessionPostConnect(freerdp* instance)
         return FALSE;
     if (!gdi_init(instance, PIXEL_FORMAT_BGRA32))
         return FALSE;
-    rdpUpdate* update = instance->context->update;
-    update->BeginPaint = SessionBeginPaint;
-    update->EndPaint = SessionEndPaint;
-    update->DesktopResize = SessionDesktopResize;
-    g_originalBitmapUpdate = update->BitmapUpdate;
-    g_originalSurfaceBits = update->SurfaceBits;
-    g_originalRefreshRect = update->RefreshRect;
-    update->BitmapUpdate = SessionBitmapUpdate;
-    update->SurfaceBits = SessionSurfaceBits;
-    update->RefreshRect = SessionRefreshRect;
+    instance->context->update->BeginPaint = SessionBeginPaint;
+    instance->context->update->EndPaint = SessionEndPaint;
+    instance->context->update->DesktopResize = SessionDesktopResize;
     return TRUE;
 }
 
@@ -738,12 +552,12 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
 
 static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
 {
-    size_t argc = 3;
-    napi_value args[3] = {nullptr, nullptr, nullptr};
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     napi_value result;
     napi_get_boolean(env, false, &result);
-    if (argc < 3) {
+    if (argc < 2) {
         return result;
     }
 
@@ -753,44 +567,42 @@ static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
         return result;
     }
 
-    NativePixelMap* maps[3] = {nullptr, nullptr, nullptr};
-    int32_t strides[3] = {0, 0, 0};
-    uint32_t width = 0;
-    uint32_t height = 0;
-    for (int i = 0; i < 3; ++i) {
-        maps[i] = OH_PixelMap_InitNativePixelMap(env, args[i]);
-        if (!maps[i]) {
-            return result;
-        }
-        OhosPixelMapInfos info = {};
-        if (OH_PixelMap_GetImageInfo(maps[i], &info) != 0 ||
-            OH_PixelMap_GetBytesNumberPerRow(maps[i], &strides[i]) != 0) {
-            return result;
-        }
-        if (i == 0) {
-            width = info.width;
-            height = info.height;
-        } else if (info.width != width || info.height != height) {
-            return result;
-        }
-        if (strides[i] < static_cast<int32_t>(width * 4)) {
-            return result;
-        }
+    NativePixelMap* front = OH_PixelMap_InitNativePixelMap(env, args[0]);
+    NativePixelMap* back = OH_PixelMap_InitNativePixelMap(env, args[1]);
+    if (!front || !back) {
+        return result;
+    }
+    OhosPixelMapInfos frontInfo = {};
+    OhosPixelMapInfos backInfo = {};
+    int32_t frontStride = 0;
+    int32_t backStride = 0;
+    if (OH_PixelMap_GetImageInfo(front, &frontInfo) != 0 ||
+        OH_PixelMap_GetImageInfo(back, &backInfo) != 0 ||
+        OH_PixelMap_GetBytesNumberPerRow(front, &frontStride) != 0 ||
+        OH_PixelMap_GetBytesNumberPerRow(back, &backStride) != 0) {
+        return result;
+    }
+    if (frontInfo.width <= 0 || frontInfo.height <= 0 ||
+        frontInfo.width != backInfo.width || frontInfo.height != backInfo.height ||
+        frontStride < static_cast<int32_t>(frontInfo.width * 4) ||
+        backStride < static_cast<int32_t>(backInfo.width * 4)) {
+        return result;
     }
 
     std::lock_guard<std::mutex> frameLock(session->mutex);
     UnbindNativePixelMaps(session, env);
-    for (int i = 0; i < 3; ++i) {
-        if (napi_create_reference(env, args[i], 1, &session->mapRefs[i]) != napi_ok) {
-            UnbindNativePixelMaps(session, env);
-            return result;
-        }
-        session->nativeMaps[i] = maps[i];
-        session->mapStrides[i] = strides[i];
+    if (napi_create_reference(env, args[0], 1, &session->frontRef) != napi_ok ||
+        napi_create_reference(env, args[1], 1, &session->backRef) != napi_ok) {
+        UnbindNativePixelMaps(session, env);
+        return result;
     }
     session->frameEnv = env;
-    session->displayIndex = 0;
+    session->frontNative = front;
+    session->backNative = back;
+    session->frontStride = frontStride;
+    session->backStride = backStride;
     session->frameIndex = 0;
+    session->writeIndex = 1;
     session->nativeBound = true;
     napi_get_boolean(env, true, &result);
     return result;
