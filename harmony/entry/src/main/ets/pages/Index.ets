@@ -4,7 +4,7 @@ import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { connect, FrameTile, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+import { connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -79,7 +79,6 @@ struct Index {
   @State private frameImage: image.PixelMap | null = null;
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
-  private canvasContext: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
   @State private isFullscreen: boolean = false;
   @State private showRemoteMenu: boolean = false;
   @State private frameWidth: number = 0;
@@ -1097,73 +1096,15 @@ struct Index {
       if (frame.version === this.frameVersion && this.frameImage !== null) {
         return;
       }
-      let pixelMs = 0;
-      if (frame.full || this.frameImage === null) {
-        if (!frame.full) {
-          return;
-        }
-        const options: image.InitializationOptions = {
-          size: { width: frame.width, height: frame.height },
-          pixelFormat: image.PixelMapFormat.BGRA_8888,
-          editable: true,
-          alphaType: image.AlphaType.OPAQUE
-        };
-        const pixelStart = Date.now();
-        const pixelMap = await image.createPixelMap(frame.data, options);
-        pixelMs = Date.now() - pixelStart;
-        if (epoch !== this.sessionEpoch) {
-          pixelMap.release();
-          return;
-        }
-        const after = getSessionInfo();
-        if (after.state !== 2) {
-          pixelMap.release();
-          this.onSessionLost(after.error);
-          return;
-        }
-        const old = this.frameImage;
-        this.frameImage = pixelMap;
-        this.frameVersion = frame.version;
-        this.frameWidth = frame.width;
-        this.frameHeight = frame.height;
-        setTimeout(() => {
-          this.redrawCanvas();
-          old?.release();
-        }, 0);
-      } else {
-        const target = this.frameImage;
-        if (target === null || frame.tiles.length === 0) {
-          return;
-        }
-        const pixelStart = Date.now();
-        for (let i = 0; i < frame.tiles.length; i++) {
-          const tile = frame.tiles[i];
-          const area: image.PositionArea = {
-            pixels: frame.data,
-            offset: tile.offset,
-            stride: tile.stride,
-            region: {
-              x: tile.x,
-              y: tile.y,
-              size: { width: tile.width, height: tile.height }
-            }
-          };
-          await target.writePixels(area);
-        }
-        pixelMs = Date.now() - pixelStart;
-        if (epoch !== this.sessionEpoch) {
-          return;
-        }
-        const after = getSessionInfo();
-        if (after.state !== 2) {
-          this.onSessionLost(after.error);
-          return;
-        }
-        this.frameVersion = frame.version;
-        this.frameWidth = frame.width;
-        this.frameHeight = frame.height;
-        this.drawDirtyTiles(frame.tiles);
-      }
+      const options: image.InitializationOptions = {
+        size: { width: frame.width, height: frame.height },
+        pixelFormat: image.PixelMapFormat.BGRA_8888,
+        editable: false,
+        alphaType: image.AlphaType.OPAQUE
+      };
+      const pixelStart = Date.now();
+      const pixelMap = await image.createPixelMap(frame.data, options);
+      const pixelMs = Date.now() - pixelStart;
       this.frameGetTotal += getMs;
       this.framePixelTotal += pixelMs;
       this.frameStatsCount++;
@@ -1173,6 +1114,21 @@ struct Index {
         this.framePixelTotal = 0;
         this.frameStatsCount = 0;
       }
+      if (epoch !== this.sessionEpoch) {
+        pixelMap.release();
+        return;
+      }
+      const after = getSessionInfo();
+      if (after.state !== 2) {
+        pixelMap.release();
+        this.onSessionLost(after.error);
+        return;
+      }
+      const old = this.frameImage;
+      this.frameImage = pixelMap;
+      this.frameVersion = frame.version;
+      this.frameWidth = frame.width;
+      this.frameHeight = frame.height;
       const now = Date.now();
       if (this.fpsStart === 0) {
         this.fpsStart = now;
@@ -1184,7 +1140,7 @@ struct Index {
         this.fpsStart = now;
       }
       this.status = `已连接 · ${frame.width}×${frame.height} · ${this.scalePercent()} · ${this.frameFps}fps`;
-
+      old?.release();
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
     } finally {
@@ -1272,9 +1228,6 @@ struct Index {
           this.viewOffsetX += deltaX;
           this.viewOffsetY += deltaY;
           this.clampViewOffsets();
-          setTimeout(() => {
-            this.redrawCanvas();
-          }, 0);
         }
         this.panLastX = touchX;
         this.panLastY = touchY;
@@ -1418,35 +1371,6 @@ struct Index {
 
   private displayImageHeight(): number {
     return this.frameHeight * this.baseDisplayScale() * this.viewScale;
-  }
-
-  private redrawCanvas(): void {
-    if (this.frameImage === null) {
-      return;
-    }
-    const width = this.displayImageWidth();
-    const height = this.displayImageHeight();
-    if (width <= 0 || height <= 0) {
-      return;
-    }
-    this.canvasContext.clearRect(0, 0, width, height);
-    this.canvasContext.drawImage(this.frameImage, 0, 0, width, height);
-  }
-
-  private drawDirtyTiles(tiles: FrameTile[]): void {
-    if (this.frameImage === null || tiles.length === 0) {
-      return;
-    }
-    const scale = this.baseDisplayScale() * this.viewScale;
-    if (scale <= 0) {
-      return;
-    }
-    for (let i = 0; i < tiles.length; i++) {
-      const tile = tiles[i];
-      this.canvasContext.drawImage(this.frameImage,
-        tile.x, tile.y, tile.width, tile.height,
-        tile.x * scale, tile.y * scale, tile.width * scale, tile.height * scale);
-    }
   }
 
   private clampViewOffsets(): void {
@@ -1765,9 +1689,6 @@ struct Index {
       this.appWindow.setWindowSystemBarEnable([]).catch(() => {
       });
     }
-    setTimeout(() => {
-      this.redrawCanvas();
-    }, 100);
   }
 
   private exitFullscreen(): void {
@@ -1782,9 +1703,6 @@ struct Index {
       this.appWindow.setWindowSystemBarEnable(['status', 'navigation']).catch(() => {
       });
     }
-    setTimeout(() => {
-      this.redrawCanvas();
-    }, 100);
   }
 
   private disconnect(): void {
@@ -2901,9 +2819,6 @@ struct Index {
               this.viewScale = 1;
               this.viewOffsetX = 0;
               this.viewOffsetY = 0;
-              setTimeout(() => {
-                this.redrawCanvas();
-              }, 0);
             })
           Button(this.moveMode ? '移动中' : '移动')
             .fontSize(12)
@@ -2999,9 +2914,6 @@ struct Index {
                 this.viewScale = 1;
                 this.viewOffsetX = 0;
                 this.viewOffsetY = 0;
-                setTimeout(() => {
-                  this.redrawCanvas();
-                }, 0);
               })
             Button('全屏')
               .fontSize(12)
@@ -3020,13 +2932,14 @@ struct Index {
 
         if (this.frameImage !== null) {
           Stack({ alignContent: Alignment.Center }) {
-            Canvas(this.canvasContext)
+            Image(this.frameImage)
               .width(this.displayImageWidth())
               .height(this.displayImageHeight())
+              .objectFit(ImageFit.Fill)
+              .draggable(false)
+              .enableAnalyzer(false)
+              .backgroundColor(Color.Transparent)
               .offset({ x: this.viewOffsetX, y: this.viewOffsetY })
-              .onReady(() => {
-                this.redrawCanvas();
-              })
           }
           .width('100%')
           .layoutWeight(1)
@@ -3039,7 +2952,6 @@ struct Index {
               this.imageGlobalX = Number(newValue.globalPosition.x);
               this.imageGlobalY = Number(newValue.globalPosition.y);
               this.clampViewOffsets();
-              this.redrawCanvas();
             })
             .onTouch((event: TouchEvent) => {
               this.handleTouch(event);
@@ -3128,9 +3040,6 @@ struct Index {
                         (this.pinchFocalY - centerY) * (1 - ratio);
                       this.viewScale = newScale;
                       this.clampViewOffsets();
-                      setTimeout(() => {
-                        this.redrawCanvas();
-                      }, 0);
                     }
                   })
                   .onActionEnd(() => {
