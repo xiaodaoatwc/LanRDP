@@ -2,20 +2,10 @@ export const add: (a: number, b: number) => number;
 export const version: () => string;
 export const freerdpVersion: () => string;
 export const connect: (host: string, port: number, username: string, password: string, domain: string, width: number, height: number, desktopScale: number, deviceScale: number) => Promise<string>;
-export interface FrameTile {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  offset: number;
-  stride: number;
-}
 export interface Frame {
   width: number;
   height: number;
   version: number;
-  full: boolean;
-  tiles: FrameTile[];
   data: ArrayBuffer;
 }
 export interface SessionInfo {
