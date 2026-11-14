@@ -27,6 +27,7 @@ interface ScaleValues {
 
 interface SavedConnection {
   id: string;
+  name?: string;
   host: string;
   port: string;
   username: string;
@@ -50,6 +51,8 @@ struct Index {
   @State private savedConnections: SavedConnection[] = [];
   @State private selectedConnectionIndex: number = 0;
   @State private selectedConnectionId: string = '';
+  @State private renamingProfile: boolean = false;
+  @State private renameText: string = '';
   private loadingSettings: boolean = false;
   private applyingProfile: boolean = false;
   @State private status: string = `FreeRDP ${freerdpVersion()}`;
@@ -221,10 +224,14 @@ struct Index {
     return scales[0];
   }
 
+  private scalePercent(): string {
+    return `${this.scaleValues().desktop}%`;
+  }
+
   private passwordAlias(id: string = 'default'): Uint8Array {
     const name = id === 'default'
       ? 'com.xiaodaoatwc.lanrdp.password'
-      : `com.xiaodaoatwc.lanrdp.password.`;
+      : `com.xiaodaoatwc.lanrdp.password.${id}`;
     return new util.TextEncoder().encodeInto(name);
   }
 
@@ -385,8 +392,57 @@ struct Index {
   }
 
   private connectionLabel(profile: SavedConnection): string {
+    if (profile.name !== undefined && profile.name.length > 0) {
+      return profile.name;
+    }
     const name = profile.username.length > 0 ? `${profile.username}@${profile.host}` : profile.host;
     return profile.port.length > 0 && profile.port !== '3389' ? `${name}:${profile.port}` : name;
+  }
+
+  private startRename(): void {
+    if (this.selectedConnectionId.length === 0) {
+      this.status = '请先选择连接记录';
+      return;
+    }
+    const profile = this.savedConnections.find((item: SavedConnection) => item.id === this.selectedConnectionId);
+    if (!profile) {
+      return;
+    }
+    this.renameText = profile.name !== undefined && profile.name.length > 0
+      ? profile.name
+      : this.connectionLabel(profile);
+    this.renamingProfile = true;
+  }
+
+  private async confirmRename(): Promise<void> {
+    const id = this.selectedConnectionId;
+    const index = this.savedConnections.findIndex((item: SavedConnection) => item.id === id);
+    if (index < 0) {
+      this.renamingProfile = false;
+      return;
+    }
+    const old = this.savedConnections[index];
+    const next = this.savedConnections.slice();
+    next[index] = {
+      id: old.id,
+      name: this.renameText.trim(),
+      host: old.host,
+      port: old.port,
+      username: old.username,
+      domain: old.domain,
+      resolutionPreset: old.resolutionPreset,
+      scalePreset: old.scalePreset,
+      savePassword: old.savePassword
+    };
+    this.savedConnections = next;
+    this.renamingProfile = false;
+    await this.persistProfiles();
+    this.status = '已重命名连接记录';
+  }
+
+  private cancelRename(): void {
+    this.renamingProfile = false;
+    this.renameText = '';
   }
 
   private connectionOptions(): SelectOption[] {
@@ -469,8 +525,10 @@ struct Index {
       id = util.generateRandomUUID();
     }
 
+    const existingName = index >= 0 ? this.savedConnections[index].name : undefined;
     const profile: SavedConnection = {
       id: id,
+      name: existingName,
       host: host,
       port: this.portText.trim(),
       username: this.username.trim(),
@@ -628,7 +686,7 @@ struct Index {
       this.frameVersion = frame.version;
       this.frameWidth = frame.width;
       this.frameHeight = frame.height;
-      this.status = `已连接 · ${frame.width}×${frame.height}`;
+      this.status = `已连接 · ${frame.width}×${frame.height} · ${this.scalePercent()}`;
       old?.release();
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
@@ -1347,6 +1405,12 @@ struct Index {
               .onClick(() => {
                 this.saveCurrentProfile(true);
               })
+            Button('改名')
+              .fontSize(12)
+              .height(36)
+              .onClick(() => {
+                this.startRename();
+              })
             Button('删除')
               .fontSize(12)
               .height(36)
@@ -1355,6 +1419,30 @@ struct Index {
               })
           }
           .width('100%')
+
+          if (this.renamingProfile) {
+            Row({ space: 8 }) {
+              TextInput({ placeholder: '连接名称', text: this.renameText })
+                .onChange((value: string) => {
+                  this.renameText = value;
+                })
+                .height(36)
+                .layoutWeight(1)
+              Button('确定')
+                .fontSize(12)
+                .height(36)
+                .onClick(() => {
+                  this.confirmRename();
+                })
+              Button('取消')
+                .fontSize(12)
+                .height(36)
+                .onClick(() => {
+                  this.cancelRename();
+                })
+            }
+            .width('100%')
+          }
 
           TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
             .onChange((value: string) => {
@@ -1521,6 +1609,10 @@ struct Index {
               this.handleTouch(event);
             })
             .onMouse((event: MouseEvent) => {
+              if (event.action === MouseAction.Move) {
+                this.sendMouseMoveAt(event.x, event.y, 0);
+                return;
+              }
               if (event.button === MouseButton.Right) {
                 if (event.action === MouseAction.Press) {
                   this.sendMouseAt(event.x, event.y, true, 2);
