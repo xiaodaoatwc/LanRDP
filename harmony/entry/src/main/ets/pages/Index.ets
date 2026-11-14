@@ -4,7 +4,7 @@ import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+import { connect, FrameTile, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -1100,43 +1100,80 @@ struct Index {
         return;
       }
       let pixelMs = 0;
-      const needsNewBuffers = this.frameImage === null || this.frameBack === null ||
-        frame.width !== this.frameWidth || frame.height !== this.frameHeight;
-      if (needsNewBuffers) {
-        const options: image.InitializationOptions = {
-          size: { width: frame.width, height: frame.height },
-          pixelFormat: image.PixelMapFormat.BGRA_8888,
-          editable: true,
-          alphaType: image.AlphaType.OPAQUE
-        };
+      const sameSize = this.frameImage !== null && this.frameBack !== null &&
+        frame.width === this.frameWidth && frame.height === this.frameHeight;
+      if (frame.full) {
         const pixelStart = Date.now();
-        const front = await image.createPixelMap(frame.data, options);
-        const back = await image.createPixelMap(frame.data, options);
+        if (!sameSize) {
+          const options: image.InitializationOptions = {
+            size: { width: frame.width, height: frame.height },
+            pixelFormat: image.PixelMapFormat.BGRA_8888,
+            editable: true,
+            alphaType: image.AlphaType.OPAQUE
+          };
+          const front = await image.createPixelMap(frame.data, options);
+          const back = await image.createPixelMap(frame.data, options);
+          if (epoch !== this.sessionEpoch) {
+            front.release();
+            back.release();
+            return;
+          }
+          const after = getSessionInfo();
+          if (after.state !== 2) {
+            front.release();
+            back.release();
+            this.onSessionLost(after.error);
+            return;
+          }
+          this.frameImage?.release();
+          this.frameBack?.release();
+          this.frameImage = front;
+          this.frameBack = back;
+        } else {
+          const front = this.frameImage;
+          const back = this.frameBack;
+          if (front === null || back === null) {
+            return;
+          }
+          await front.writeAllPixelsFromBuffer(frame.data);
+          await back.writeAllPixelsFromBuffer(frame.data);
+          if (epoch !== this.sessionEpoch) {
+            return;
+          }
+          const after = getSessionInfo();
+          if (after.state !== 2) {
+            this.onSessionLost(after.error);
+            return;
+          }
+          this.frameImage = back;
+          this.frameBack = front;
+        }
         pixelMs = Date.now() - pixelStart;
-        if (epoch !== this.sessionEpoch) {
-          front.release();
-          back.release();
-          return;
-        }
-        const after = getSessionInfo();
-        if (after.state !== 2) {
-          front.release();
-          back.release();
-          this.onSessionLost(after.error);
-          return;
-        }
-        this.frameImage?.release();
-        this.frameBack?.release();
-        this.frameImage = front;
-        this.frameBack = back;
       } else {
-        const target = this.frameBack;
-        const previous = this.frameImage;
-        if (target === null) {
+        if (!sameSize || frame.tiles.length === 0) {
+          return;
+        }
+        const front = this.frameImage;
+        const back = this.frameBack;
+        if (front === null || back === null) {
           return;
         }
         const pixelStart = Date.now();
-        await target.writeAllPixelsFromBuffer(frame.data);
+        for (let i = 0; i < frame.tiles.length; i++) {
+          const tile = frame.tiles[i];
+          const area: image.PositionArea = {
+            pixels: frame.data,
+            offset: tile.offset,
+            stride: tile.stride,
+            region: {
+              x: tile.x,
+              y: tile.y,
+              size: { width: tile.width, height: tile.height }
+            }
+          };
+          await front.writePixels(area);
+          await back.writePixels(area);
+        }
         pixelMs = Date.now() - pixelStart;
         if (epoch !== this.sessionEpoch) {
           return;
@@ -1146,8 +1183,8 @@ struct Index {
           this.onSessionLost(after.error);
           return;
         }
-        this.frameImage = target;
-        this.frameBack = previous;
+        this.frameImage = back;
+        this.frameBack = front;
       }
       this.frameGetTotal += getMs;
       this.framePixelTotal += pixelMs;

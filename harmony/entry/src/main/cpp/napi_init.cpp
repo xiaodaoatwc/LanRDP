@@ -4,9 +4,11 @@
 #include <freerdp/settings.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
+#include <freerdp/update.h>
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -63,12 +65,19 @@ enum SessionState {
     SESSION_FAILED = 4
 };
 
+static constexpr int kTileSize = 64;
+
 struct Session {
     freerdp* instance = nullptr;
     rdpContext* context = nullptr;
     std::thread thread;
     std::mutex mutex;
     std::vector<uint8_t> pixels;
+    std::vector<uint8_t> pendingTiles;
+    std::vector<uint8_t> unreadTiles;
+    int tilesX = 0;
+    int tilesY = 0;
+    bool fullFrame = true;
     int width = 0;
     int height = 0;
     uint64_t version = 0;
@@ -85,6 +94,117 @@ struct SessionContext {
 static std::mutex g_sessionMutex;
 static Session* g_session = nullptr;
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
+
+static void EnsureDirtyGrid(Session* session)
+{
+    if (!session || session->width <= 0 || session->height <= 0)
+        return;
+    const int tilesX = (session->width + kTileSize - 1) / kTileSize;
+    const int tilesY = (session->height + kTileSize - 1) / kTileSize;
+    const size_t count = static_cast<size_t>(tilesX) * tilesY;
+    if (session->tilesX != tilesX || session->tilesY != tilesY ||
+        session->pendingTiles.size() != count || session->unreadTiles.size() != count) {
+        session->tilesX = tilesX;
+        session->tilesY = tilesY;
+        session->pendingTiles.assign(count, 0);
+        session->unreadTiles.assign(count, 0);
+        session->fullFrame = true;
+    }
+}
+
+static void MarkDirtyLocked(Session* session, int x, int y, int width, int height)
+{
+    if (!session || width <= 0 || height <= 0)
+        return;
+    EnsureDirtyGrid(session);
+    if (session->tilesX <= 0 || session->tilesY <= 0)
+        return;
+    const int left = std::max(0, x);
+    const int top = std::max(0, y);
+    const int right = std::min(session->width, x + width);
+    const int bottom = std::min(session->height, y + height);
+    if (right <= left || bottom <= top)
+        return;
+    const int tx0 = left / kTileSize;
+    const int ty0 = top / kTileSize;
+    const int tx1 = (right - 1) / kTileSize;
+    const int ty1 = (bottom - 1) / kTileSize;
+    for (int ty = ty0; ty <= ty1; ++ty) {
+        for (int tx = tx0; tx <= tx1; ++tx) {
+            session->pendingTiles[static_cast<size_t>(ty) * session->tilesX + tx] = 1;
+        }
+    }
+}
+
+static void MarkDirty(Session* session, int x, int y, int width, int height)
+{
+    if (!session)
+        return;
+    std::lock_guard<std::mutex> lock(session->mutex);
+    MarkDirtyLocked(session, x, y, width, height);
+}
+
+static void MarkAllDirty(Session* session)
+{
+    if (!session)
+        return;
+    std::lock_guard<std::mutex> lock(session->mutex);
+    EnsureDirtyGrid(session);
+    session->fullFrame = true;
+    std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 1);
+}
+
+static pBitmapUpdate g_originalBitmapUpdate = nullptr;
+static pSurfaceBits g_originalSurfaceBits = nullptr;
+static pRefreshRect g_originalRefreshRect = nullptr;
+
+static Session* SessionFromContext(rdpContext* context)
+{
+    auto* sessionContext = reinterpret_cast<SessionContext*>(context);
+    return sessionContext ? sessionContext->session : nullptr;
+}
+
+static BOOL SessionBitmapUpdate(rdpContext* context, const BITMAP_UPDATE* bitmap)
+{
+    const BOOL result = g_originalBitmapUpdate ? g_originalBitmapUpdate(context, bitmap) : TRUE;
+    Session* session = SessionFromContext(context);
+    if (session && bitmap) {
+        for (UINT32 i = 0; i < bitmap->number; ++i) {
+            const BITMAP_DATA& data = bitmap->rectangles[i];
+            MarkDirty(session, static_cast<int>(data.destLeft), static_cast<int>(data.destTop),
+                      static_cast<int>(data.width), static_cast<int>(data.height));
+        }
+    }
+    return result;
+}
+
+static BOOL SessionSurfaceBits(rdpContext* context, const SURFACE_BITS_COMMAND* command)
+{
+    const BOOL result = g_originalSurfaceBits ? g_originalSurfaceBits(context, command) : TRUE;
+    Session* session = SessionFromContext(context);
+    if (session && command) {
+        const int width = static_cast<int>(command->destRight) - static_cast<int>(command->destLeft);
+        const int height = static_cast<int>(command->destBottom) - static_cast<int>(command->destTop);
+        MarkDirty(session, static_cast<int>(command->destLeft), static_cast<int>(command->destTop),
+                  width, height);
+    }
+    return result;
+}
+
+static BOOL SessionRefreshRect(rdpContext* context, BYTE count, const RECTANGLE_16* areas)
+{
+    const BOOL result = g_originalRefreshRect ? g_originalRefreshRect(context, count, areas) : TRUE;
+    Session* session = SessionFromContext(context);
+    if (session && areas) {
+        for (BYTE i = 0; i < count; ++i) {
+            const RECTANGLE_16& area = areas[i];
+            MarkDirty(session, static_cast<int>(area.left), static_cast<int>(area.top),
+                      static_cast<int>(area.right) - static_cast<int>(area.left),
+                      static_cast<int>(area.bottom) - static_cast<int>(area.top));
+        }
+    }
+    return result;
+}
 
 static void SetSessionState(Session* session, int state, const std::string& error = {})
 {
@@ -121,23 +241,69 @@ static BOOL SessionEndPaint(rdpContext* context)
 
     const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
-    session->pixels.resize(static_cast<size_t>(width) * height * 4);
-    const BOOL converted = freerdp_image_copy(
-        session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
-        0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
-        source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
-    if (!converted)
-        return TRUE;
-
     session->width = width;
     session->height = height;
+    EnsureDirtyGrid(session);
+
+    const size_t fullSize = static_cast<size_t>(width) * height * 4;
+    const bool needFull = session->fullFrame || session->pixels.size() != fullSize;
+    if (needFull) {
+        session->pixels.resize(fullSize);
+        const BOOL converted = freerdp_image_copy(
+            session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
+            0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+            source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+        if (!converted)
+            return TRUE;
+        std::fill(session->unreadTiles.begin(), session->unreadTiles.end(), 1);
+        std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 0);
+        session->fullFrame = false;
+        ++session->version;
+        return TRUE;
+    }
+
+    bool anyDirty = false;
+    for (size_t i = 0; i < session->pendingTiles.size(); ++i) {
+        if (!session->pendingTiles[i])
+            continue;
+        anyDirty = true;
+        session->unreadTiles[i] = 1;
+        const int tx = static_cast<int>(i) % session->tilesX;
+        const int ty = static_cast<int>(i) / session->tilesX;
+        const int x = tx * kTileSize;
+        const int y = ty * kTileSize;
+        const int tileWidth = std::min(kTileSize, width - x);
+        const int tileHeight = std::min(kTileSize, height - y);
+        if (format == PIXEL_FORMAT_BGRA32) {
+            const BYTE* src = source + static_cast<size_t>(y) * stride + static_cast<size_t>(x) * 4;
+            BYTE* dst = session->pixels.data() +
+                (static_cast<size_t>(y) * width + x) * 4;
+            for (int row = 0; row < tileHeight; ++row) {
+                std::memcpy(dst + static_cast<size_t>(row) * width * 4,
+                            src + static_cast<size_t>(row) * stride,
+                            static_cast<size_t>(tileWidth) * 4);
+            }
+        } else {
+            freerdp_image_copy(
+                session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
+                x, y, static_cast<UINT32>(tileWidth), static_cast<UINT32>(tileHeight),
+                source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+        }
+    }
+    std::fill(session->pendingTiles.begin(), session->pendingTiles.end(), 0);
+    if (!anyDirty)
+        return TRUE;
+
     ++session->version;
     return TRUE;
 }
 
 static BOOL SessionDesktopResize(rdpContext* context)
 {
-    (void)context;
+    Session* session = SessionFromContext(context);
+    if (session) {
+        MarkAllDirty(session);
+    }
     return TRUE;
 }
 
@@ -193,9 +359,16 @@ static BOOL SessionPostConnect(freerdp* instance)
         return FALSE;
     if (!gdi_init(instance, PIXEL_FORMAT_BGRA32))
         return FALSE;
-    instance->context->update->BeginPaint = SessionBeginPaint;
-    instance->context->update->EndPaint = SessionEndPaint;
-    instance->context->update->DesktopResize = SessionDesktopResize;
+    rdpUpdate* update = instance->context->update;
+    update->BeginPaint = SessionBeginPaint;
+    update->EndPaint = SessionEndPaint;
+    update->DesktopResize = SessionDesktopResize;
+    g_originalBitmapUpdate = update->BitmapUpdate;
+    g_originalSurfaceBits = update->SurfaceBits;
+    g_originalRefreshRect = update->RefreshRect;
+    update->BitmapUpdate = SessionBitmapUpdate;
+    update->SurfaceBits = SessionSurfaceBits;
+    update->RefreshRect = SessionRefreshRect;
     return TRUE;
 }
 
@@ -494,26 +667,100 @@ static napi_value GetFrame(napi_env env, napi_callback_info info)
     std::lock_guard<std::mutex> frameLock(session->mutex);
     if (session->pixels.empty() || session->width <= 0 || session->height <= 0)
         return result;
+    EnsureDirtyGrid(session);
 
-    size_t size = session->pixels.size();
-    void* data = nullptr;
-    napi_value buffer;
-    if (napi_create_arraybuffer(env, size, &data, &buffer) != napi_ok)
+    size_t unreadCount = 0;
+    for (uint8_t dirty : session->unreadTiles) {
+        if (dirty)
+            ++unreadCount;
+    }
+    if (unreadCount == 0)
         return result;
-    std::memcpy(data, session->pixels.data(), size);
 
-    napi_value width, height, version, object;
+    const size_t tileCount = session->pendingTiles.size();
+    const bool full = unreadCount * 2 >= tileCount;
+    std::vector<uint8_t> frameData;
+    std::vector<int> tileInfo;
+    if (full) {
+        frameData = session->pixels;
+        std::fill(session->unreadTiles.begin(), session->unreadTiles.end(), 0);
+    } else {
+        frameData.reserve(unreadCount * kTileSize * kTileSize * 4);
+        for (size_t i = 0; i < session->unreadTiles.size(); ++i) {
+            if (!session->unreadTiles[i])
+                continue;
+            const int tx = static_cast<int>(i) % session->tilesX;
+            const int ty = static_cast<int>(i) / session->tilesX;
+            const int x = tx * kTileSize;
+            const int y = ty * kTileSize;
+            const int tileWidth = std::min(kTileSize, session->width - x);
+            const int tileHeight = std::min(kTileSize, session->height - y);
+            const int offset = static_cast<int>(frameData.size());
+            const int stride = tileWidth * 4;
+            const size_t oldSize = frameData.size();
+            frameData.resize(oldSize + static_cast<size_t>(stride) * tileHeight);
+            const uint8_t* src = session->pixels.data() +
+                (static_cast<size_t>(y) * session->width + x) * 4;
+            uint8_t* dst = frameData.data() + oldSize;
+            for (int row = 0; row < tileHeight; ++row) {
+                std::memcpy(dst + static_cast<size_t>(row) * stride,
+                            src + static_cast<size_t>(row) * session->width * 4,
+                            static_cast<size_t>(stride));
+            }
+            tileInfo.push_back(x);
+            tileInfo.push_back(y);
+            tileInfo.push_back(tileWidth);
+            tileInfo.push_back(tileHeight);
+            tileInfo.push_back(offset);
+            tileInfo.push_back(stride);
+        }
+        std::fill(session->unreadTiles.begin(), session->unreadTiles.end(), 0);
+    }
+
+    void* bufferData = nullptr;
+    napi_value buffer;
+    if (napi_create_arraybuffer(env, frameData.size(), &bufferData, &buffer) != napi_ok)
+        return result;
+    std::memcpy(bufferData, frameData.data(), frameData.size());
+
+    napi_value object;
+    napi_value width;
+    napi_value height;
+    napi_value version;
+    napi_value fullValue;
+    napi_value tiles;
+    napi_create_object(env, &object);
     napi_create_int32(env, session->width, &width);
     napi_create_int32(env, session->height, &height);
     napi_create_double(env, static_cast<double>(session->version), &version);
-    napi_create_object(env, &object);
+    napi_get_boolean(env, full, &fullValue);
+    napi_create_array_with_length(env, tileInfo.size() / 6, &tiles);
+    for (size_t i = 0; i < tileInfo.size() / 6; ++i) {
+        napi_value tile;
+        napi_value value;
+        napi_create_object(env, &tile);
+        napi_create_int32(env, tileInfo[i * 6 + 0], &value);
+        napi_set_named_property(env, tile, "x", value);
+        napi_create_int32(env, tileInfo[i * 6 + 1], &value);
+        napi_set_named_property(env, tile, "y", value);
+        napi_create_int32(env, tileInfo[i * 6 + 2], &value);
+        napi_set_named_property(env, tile, "width", value);
+        napi_create_int32(env, tileInfo[i * 6 + 3], &value);
+        napi_set_named_property(env, tile, "height", value);
+        napi_create_int32(env, tileInfo[i * 6 + 4], &value);
+        napi_set_named_property(env, tile, "offset", value);
+        napi_create_int32(env, tileInfo[i * 6 + 5], &value);
+        napi_set_named_property(env, tile, "stride", value);
+        napi_set_element(env, tiles, static_cast<uint32_t>(i), tile);
+    }
     napi_set_named_property(env, object, "width", width);
     napi_set_named_property(env, object, "height", height);
     napi_set_named_property(env, object, "version", version);
+    napi_set_named_property(env, object, "full", fullValue);
+    napi_set_named_property(env, object, "tiles", tiles);
     napi_set_named_property(env, object, "data", buffer);
     return object;
 }
-
 
 static napi_value SendMouse(napi_env env, napi_callback_info info)
 {
