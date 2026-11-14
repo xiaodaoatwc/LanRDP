@@ -73,10 +73,13 @@ struct Session {
     napi_env frameEnv = nullptr;
     napi_ref frontRef = nullptr;
     napi_ref backRef = nullptr;
+    napi_ref extraRef = nullptr;
     NativePixelMap* frontNative = nullptr;
     NativePixelMap* backNative = nullptr;
+    NativePixelMap* extraNative = nullptr;
     int frontStride = 0;
     int backStride = 0;
+    int extraStride = 0;
     int frameIndex = 0;
     int writeIndex = 1;
     int displayIndex = 0;
@@ -112,11 +115,17 @@ static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
             napi_delete_reference(useEnv, session->backRef);
             session->backRef = nullptr;
         }
+        if (session->extraRef) {
+            napi_delete_reference(useEnv, session->extraRef);
+            session->extraRef = nullptr;
+        }
     }
     session->frontNative = nullptr;
     session->backNative = nullptr;
+    session->extraNative = nullptr;
     session->frontStride = 0;
     session->backStride = 0;
+    session->extraStride = 0;
     session->frameIndex = 0;
     session->writeIndex = 1;
     session->displayIndex = 0;
@@ -159,13 +168,20 @@ static BOOL SessionEndPaint(rdpContext* context)
     const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
     if (session->nativeBound) {
-        if (session->frameIndex != session->displayIndex) {
-            return TRUE;
+        int targetIndex = -1;
+        for (int i = 0; i < 3; ++i) {
+            if (i != session->displayIndex && i != session->frameIndex) {
+                targetIndex = i;
+                break;
+            }
         }
-        const int targetIndex = 1 - session->displayIndex;
-        const bool useFront = targetIndex == 0;
-        NativePixelMap* target = useFront ? session->frontNative : session->backNative;
-        const int targetStride = useFront ? session->frontStride : session->backStride;
+        if (targetIndex < 0) {
+            targetIndex = (session->displayIndex + 1) % 3;
+        }
+        NativePixelMap* target = targetIndex == 0 ? session->frontNative :
+            (targetIndex == 1 ? session->backNative : session->extraNative);
+        const int targetStride = targetIndex == 0 ? session->frontStride :
+            (targetIndex == 1 ? session->backStride : session->extraStride);
         if (target && targetStride >= width * 4 &&
             session->width == width && session->height == height) {
             void* targetPixels = nullptr;
@@ -178,7 +194,6 @@ static BOOL SessionEndPaint(rdpContext* context)
                 OH_PixelMap_UnAccessPixels(target);
                 if (copied) {
                     session->frameIndex = targetIndex;
-                    session->writeIndex = 1 - targetIndex;
                     ++session->version;
                     return TRUE;
                 }
@@ -558,12 +573,12 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
 
 static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
 {
-    size_t argc = 2;
-    napi_value args[2] = {nullptr, nullptr};
+    size_t argc = 3;
+    napi_value args[3] = {nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     napi_value result;
     napi_get_boolean(env, false, &result);
-    if (argc < 2) {
+    if (argc < 3) {
         return result;
     }
 
@@ -575,38 +590,48 @@ static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
 
     NativePixelMap* front = OH_PixelMap_InitNativePixelMap(env, args[0]);
     NativePixelMap* back = OH_PixelMap_InitNativePixelMap(env, args[1]);
-    if (!front || !back) {
+    NativePixelMap* extra = OH_PixelMap_InitNativePixelMap(env, args[2]);
+    if (!front || !back || !extra) {
         return result;
     }
     OhosPixelMapInfos frontInfo = {};
     OhosPixelMapInfos backInfo = {};
+    OhosPixelMapInfos extraInfo = {};
     int32_t frontStride = 0;
     int32_t backStride = 0;
+    int32_t extraStride = 0;
     if (OH_PixelMap_GetImageInfo(front, &frontInfo) != 0 ||
         OH_PixelMap_GetImageInfo(back, &backInfo) != 0 ||
+        OH_PixelMap_GetImageInfo(extra, &extraInfo) != 0 ||
         OH_PixelMap_GetBytesNumberPerRow(front, &frontStride) != 0 ||
-        OH_PixelMap_GetBytesNumberPerRow(back, &backStride) != 0) {
+        OH_PixelMap_GetBytesNumberPerRow(back, &backStride) != 0 ||
+        OH_PixelMap_GetBytesNumberPerRow(extra, &extraStride) != 0) {
         return result;
     }
     if (frontInfo.width <= 0 || frontInfo.height <= 0 ||
         frontInfo.width != backInfo.width || frontInfo.height != backInfo.height ||
+        frontInfo.width != extraInfo.width || frontInfo.height != extraInfo.height ||
         frontStride < static_cast<int32_t>(frontInfo.width * 4) ||
-        backStride < static_cast<int32_t>(backInfo.width * 4)) {
+        backStride < static_cast<int32_t>(frontInfo.width * 4) ||
+        extraStride < static_cast<int32_t>(frontInfo.width * 4)) {
         return result;
     }
 
     std::lock_guard<std::mutex> frameLock(session->mutex);
     UnbindNativePixelMaps(session, env);
     if (napi_create_reference(env, args[0], 1, &session->frontRef) != napi_ok ||
-        napi_create_reference(env, args[1], 1, &session->backRef) != napi_ok) {
+        napi_create_reference(env, args[1], 1, &session->backRef) != napi_ok ||
+        napi_create_reference(env, args[2], 1, &session->extraRef) != napi_ok) {
         UnbindNativePixelMaps(session, env);
         return result;
     }
     session->frameEnv = env;
     session->frontNative = front;
     session->backNative = back;
+    session->extraNative = extra;
     session->frontStride = frontStride;
     session->backStride = backStride;
+    session->extraStride = extraStride;
     session->frameIndex = 0;
     session->writeIndex = 1;
     session->displayIndex = 0;
