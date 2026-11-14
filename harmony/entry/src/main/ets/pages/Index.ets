@@ -79,6 +79,8 @@ struct Index {
   @State private frameImage: image.PixelMap | null = null;
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
+  @State private isFullscreen: boolean = false;
+  @State private showRemoteMenu: boolean = false;
   @State private frameWidth: number = 0;
   @State private frameHeight: number = 0;
   @State private imageViewWidth: number = 0;
@@ -95,6 +97,7 @@ struct Index {
   @State private moveMode: boolean = false;
   @State private keyStyle: number = 0;
   @State private inputFocused: boolean = false;
+  @State private viewOffsetX: number = 0;
   @State private viewOffsetY: number = 0;
   @State private viewScale: number = 1;
   @State private systemKeyboardHeight: number = 0;
@@ -102,7 +105,10 @@ struct Index {
   private comboKeys: ComboKey[] = [];
   private heldModifiers: number[] = [];
   private appWindow: window.Window | null = null;
+  private panLastX: number = 0;
   private panLastY: number = 0;
+  private pinchFocalX: number = 0;
+  private pinchFocalY: number = 0;
   private panMoved: boolean = false;
   private pinchStartScale: number = 1;
   private pinchEngaged: boolean = false;
@@ -173,6 +179,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.exitFullscreen();
     if (this.appWindow !== null) {
       this.appWindow.off('keyboardHeightChange');
       this.appWindow = null;
@@ -294,6 +301,11 @@ struct Index {
 
   private scalePercent(): string {
     return `${this.scaleValues().desktop}%`;
+  }
+
+  private scrollThreshold(): number {
+    const height = this.frameHeight > 0 ? this.frameHeight : 1080;
+    return Math.max(24, Math.min(140, 56 * (1080 / height) * this.viewScale));
   }
 
   private passwordAlias(id: string = 'default'): Uint8Array {
@@ -1125,6 +1137,7 @@ struct Index {
       return;
     }
     console.info(`LanRDP session lost: ${error}`);
+    this.exitFullscreen();
     this.stopFrameTimer();
     this.releaseModifiers('sessionLost');
     this.sessionEpoch++;
@@ -1140,6 +1153,7 @@ struct Index {
     this.mouseDown = false;
     this.longPressTriggered = false;
     this.viewScale = 1;
+    this.viewOffsetX = 0;
     this.viewOffsetY = 0;
     const detail = error.length > 120 ? error.substring(0, 120) : error;
     this.status = detail.length > 0 ? `连接已断开：${detail}` : '连接已断开';
@@ -1187,14 +1201,19 @@ struct Index {
     }
     if (this.moveMode) {
       if (event.type === TouchType.Down) {
+        this.panLastX = touchX;
         this.panLastY = touchY;
         this.panMoved = false;
       } else if (event.type === TouchType.Move) {
-        const delta = touchY - this.panLastY;
-        if (Math.abs(delta) > 4) {
+        const deltaX = touchX - this.panLastX;
+        const deltaY = touchY - this.panLastY;
+        if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
           this.panMoved = true;
+          this.viewOffsetX += deltaX;
+          this.viewOffsetY += deltaY;
+          this.clampViewOffsets();
         }
-        this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, this.viewOffsetY + delta));
+        this.panLastX = touchX;
         this.panLastY = touchY;
       }
       return;
@@ -1321,6 +1340,21 @@ struct Index {
     }
   }
 
+  private clampViewOffsets(): void {
+    if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
+        this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
+      return;
+    }
+    const base = Math.min(this.imageViewWidth / this.frameWidth,
+      this.imageViewHeight / this.frameHeight);
+    const drawW = this.frameWidth * base * this.viewScale;
+    const drawH = this.frameHeight * base * this.viewScale;
+    const maxX = Math.max(0, (drawW - this.imageViewWidth / this.viewScale) / 2);
+    const maxY = Math.max(0, (drawH - this.imageViewHeight / this.viewScale) / 2);
+    this.viewOffsetX = Math.max(-maxX, Math.min(maxX, this.viewOffsetX));
+    this.viewOffsetY = Math.max(-maxY, Math.min(maxY, this.viewOffsetY));
+  }
+
   private sendMouseAt(x: number, y: number, down: boolean, button?: number): void {
     if (this.frameWidth <= 0 || this.frameHeight <= 0 ||
         this.imageViewWidth <= 0 || this.imageViewHeight <= 0) {
@@ -1334,10 +1368,10 @@ struct Index {
     if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
       return;
     }
-    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2;
-    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2;
+    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2 - this.viewOffsetX;
+    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2 - this.viewOffsetY;
     const remoteX = Math.floor((scaledX - left) / scale);
-    const remoteY = Math.floor((scaledY - this.viewOffsetY - top) / scale);
+    const remoteY = Math.floor((scaledY - top) / scale);
     sendMouse(remoteX, remoteY, button ?? this.mouseButton, down);
   }
 
@@ -1616,7 +1650,33 @@ struct Index {
     }
   }
 
+  private enterFullscreen(): void {
+    this.isFullscreen = true;
+    this.showRemoteMenu = false;
+    if (this.appWindow !== null) {
+      this.appWindow.setWindowLayoutFullScreen(true).catch(() => {
+      });
+      this.appWindow.setWindowSystemBarEnable([]).catch(() => {
+      });
+    }
+  }
+
+  private exitFullscreen(): void {
+    if (!this.isFullscreen) {
+      return;
+    }
+    this.isFullscreen = false;
+    this.showRemoteMenu = false;
+    if (this.appWindow !== null) {
+      this.appWindow.setWindowLayoutFullScreen(false).catch(() => {
+      });
+      this.appWindow.setWindowSystemBarEnable(['status', 'navigation']).catch(() => {
+      });
+    }
+  }
+
   private disconnect(): void {
+    this.exitFullscreen();
     this.stopFrameTimer();
     this.releaseModifiers("disconnect");
     this.shiftLatch = false;
@@ -1627,6 +1687,7 @@ struct Index {
     this.frameImage = null;
     this.frameVersion = 0;
     this.viewScale = 1;
+    this.viewOffsetX = 0;
     this.viewOffsetY = 0;
     this.connected = false;
     this.mouseDown = false;
@@ -1646,13 +1707,11 @@ struct Index {
   private onInputBlur(): void {
     console.info('LanRDP input blur');
     this.inputFocused = false;
-    this.viewOffsetY = 0;
   }
 
   private toggleVirtualKeyboard(): void {
     if (this.keyboardVisible) {
       this.keyboardVisible = false;
-      this.viewOffsetY = 0;
       this.focusRemoteKeyboard();
       return;
     }
@@ -1679,10 +1738,10 @@ struct Index {
     if (x < left || y < top || x >= left + drawWidth || y >= top + drawHeight) {
       return;
     }
-    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2;
-    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2;
+    const scaledX = (x - this.imageViewWidth / 2) / this.viewScale + this.imageViewWidth / 2 - this.viewOffsetX;
+    const scaledY = (y - this.imageViewHeight / 2) / this.viewScale + this.imageViewHeight / 2 - this.viewOffsetY;
     const remoteX = Math.floor((scaledX - left) / scale);
-    const remoteY = Math.floor((scaledY - this.viewOffsetY - top) / scale);
+    const remoteY = Math.floor((scaledY - top) / scale);
     sendMouseMove(remoteX, remoteY, button ?? this.mouseButton);
   }
 
@@ -1859,18 +1918,7 @@ struct Index {
   }
 
   private adjustViewForInput(): void {
-    if (this.lastClickY <= 0 || this.imageViewHeight <= 0) {
-      return;
-    }
-    const keyboardHeight = this.imageViewHeight * 0.42;
-    const visibleHeight = Math.max(80, this.imageViewHeight - keyboardHeight);
-    if (this.lastClickY <= visibleHeight * 0.6) {
-      this.viewOffsetY = 0;
-      return;
-    }
-    const targetY = visibleHeight * 0.42;
-    const desired = targetY - this.lastClickY;
-    this.viewOffsetY = Math.max(-this.imageViewHeight * 0.45, Math.min(0, desired));
+    // The user now pans the remote view explicitly; do not fight that with keyboard offsets.
   }
 
   @Builder
@@ -2695,6 +2743,108 @@ struct Index {
     .backgroundColor('#F2F2F7')
   }
 
+  @Builder
+  RemoteMenu() {
+    Column() {
+      Column({ space: 12 }) {
+        Text('远程菜单')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1C1C1E')
+          .width('100%')
+        Text(this.status)
+          .fontSize(11)
+          .fontColor('#8E8E93')
+          .width('100%')
+
+        Row({ space: 8 }) {
+          Button('中/英')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.toggleRemoteIME();
+              this.showRemoteMenu = false;
+            })
+          Button(this.shiftCompat ? 'Shift兼容' : 'Shift原生')
+            .fontSize(11)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.toggleShiftMode();
+            })
+          Button('键帽')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.keyStyle = (this.keyStyle + 1) % 2;
+            })
+        }
+        .width('100%')
+
+        Row({ space: 8 }) {
+          Button('复位')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.viewScale = 1;
+              this.viewOffsetX = 0;
+              this.viewOffsetY = 0;
+            })
+          Button(this.moveMode ? '移动中' : '移动')
+            .fontSize(12)
+            .layoutWeight(1)
+            .backgroundColor(this.moveMode ? '#0A84FF' : '#F2F2F7')
+            .fontColor(this.moveMode ? '#FFFFFF' : '#1C1C1E')
+            .onClick(() => {
+              this.moveMode = !this.moveMode;
+            })
+          Button('键盘')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.showRemoteMenu = false;
+              this.toggleVirtualKeyboard();
+            })
+          Button('退出全屏')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.exitFullscreen();
+            })
+        }
+        .width('100%')
+
+        Row({ space: 8 }) {
+          Button('关闭')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.showRemoteMenu = false;
+            })
+          Button('断开')
+            .fontSize(12)
+            .fontColor('#FF3B30')
+            .layoutWeight(1)
+            .onClick(() => {
+              this.showRemoteMenu = false;
+              this.disconnect();
+            })
+        }
+        .width('100%')
+      }
+      .width('90%')
+      .constraintSize({ maxWidth: 520 })
+      .padding(20)
+      .backgroundColor(Color.White)
+      .borderRadius(18)
+      .shadow({ radius: 30, color: '#00000033', offsetX: 0, offsetY: 10 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#66000000')
+  }
+
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column({ space: 8 }) {
@@ -2703,7 +2853,8 @@ struct Index {
         if (!this.connected) {
           this.HomeShell()
         } else {
-          Row({ space: 8 }) {
+          if (!this.isFullscreen) {
+            Row({ space: 8 }) {
             Text(this.host)
               .fontSize(13)
               .fontColor('#6B7280')
@@ -2730,15 +2881,22 @@ struct Index {
               .fontSize(12)
               .onClick(() => {
                 this.viewScale = 1;
+                this.viewOffsetX = 0;
                 this.viewOffsetY = 0;
+              })
+            Button('全屏')
+              .fontSize(12)
+              .onClick(() => {
+                this.enterFullscreen();
               })
             Button('断开')
               .fontSize(12)
               .onClick(() => {
                 this.disconnect();
               })
+            }
+            .width('100%')
           }
-          .width('100%')
         }
 
         if (this.frameImage !== null) {
@@ -2748,15 +2906,16 @@ struct Index {
             .objectFit(ImageFit.Contain)
             .draggable(false)
             .enableAnalyzer(false)
-            .backgroundColor('#000000')
-            .borderRadius(8)
-            .translate({ y: this.viewOffsetY })
+            .backgroundColor('#F2F2F7')
+            .borderRadius(this.isFullscreen ? 0 : 8)
+            .translate({ x: this.viewOffsetX, y: this.viewOffsetY })
             .scale({ x: this.viewScale, y: this.viewScale })
             .onAreaChange((_oldValue: Area, newValue: Area) => {
               this.imageViewWidth = Number(newValue.width);
               this.imageViewHeight = Number(newValue.height);
               this.imageGlobalX = Number(newValue.globalPosition.x);
               this.imageGlobalY = Number(newValue.globalPosition.y);
+              this.clampViewOffsets();
             })
             .onTouch((event: TouchEvent) => {
               this.handleTouch(event);
@@ -2796,7 +2955,7 @@ struct Index {
                   })
                   .onActionUpdate((event: GestureEvent) => {
                     const delta = event.offsetY - this.lastPanOffsetY;
-                    const threshold = 56;
+                    const threshold = this.scrollThreshold();
                     if (Math.abs(delta) >= threshold) {
                       const steps = Math.min(3, Math.floor(Math.abs(delta) / threshold));
                       const direction = delta > 0 ? 120 : -120;
@@ -2808,11 +2967,18 @@ struct Index {
                     }
                   }),
                 PinchGesture({ fingers: 2 })
-                  .onActionStart(() => {
+                  .onActionStart((event: GestureEvent) => {
                     this.pinchStartScale = this.viewScale;
                     this.pinchEngaged = false;
                     this.pinchAnchorScale = this.viewScale;
                     this.pinchAnchorRatio = 1;
+                    if (event.fingerList.length >= 2) {
+                      this.pinchFocalX = (event.fingerList[0].localX + event.fingerList[1].localX) / 2;
+                      this.pinchFocalY = (event.fingerList[0].localY + event.fingerList[1].localY) / 2;
+                    } else {
+                      this.pinchFocalX = this.imageViewWidth / 2;
+                      this.pinchFocalY = this.imageViewHeight / 2;
+                    }
                   })
                   .onActionUpdate((event: GestureEvent) => {
                     const ratio = event.scale;
@@ -2825,8 +2991,18 @@ struct Index {
                       this.pinchAnchorRatio = ratio;
                       this.twoFingerScroll = true;
                     }
-                    this.viewScale = Math.max(0.8, Math.min(2,
+                    const oldScale = this.viewScale;
+                    const newScale = Math.max(0.8, Math.min(2,
                       this.pinchAnchorScale * (ratio / this.pinchAnchorRatio)));
+                    if (newScale !== oldScale) {
+                      const centerX = this.imageViewWidth / 2;
+                      const centerY = this.imageViewHeight / 2;
+                      const factor = 1 / newScale - 1 / oldScale;
+                      this.viewOffsetX += (this.pinchFocalX - centerX) * factor;
+                      this.viewOffsetY += (this.pinchFocalY - centerY) * factor;
+                      this.viewScale = newScale;
+                      this.clampViewOffsets();
+                    }
                   })
                   .onActionEnd(() => {
                     this.pinchEngaged = false;
@@ -2842,25 +3018,25 @@ struct Index {
           .width('100%')
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
-          .backgroundColor(this.connected ? '#000000' : '#EEF1F6')
+          .backgroundColor('#F2F2F7')
           .borderRadius(8)
         }
 
 
-        if (this.connected) {
+        if (this.connected && !this.isFullscreen) {
           Row()
             .width('100%')
             .height(64)
         }
 
       }
-      .padding(this.connected ? 8 : 0)
+      .padding(this.connected ? (this.isFullscreen ? 0 : 8) : 0)
       .width('100%')
       .height('100%')
       .alignItems(HorizontalAlign.Start)
-      .backgroundColor(this.connected ? '#F7F9FC' : '#F2F2F7')
+      .backgroundColor('#F2F2F7')
 
-      if (this.connected) {
+      if (this.connected && !this.isFullscreen) {
         Row({ space: 4 }) {
           TextInput({ placeholder: '本地文本输入（点画面切回远程键盘）', text: this.keyboardText })
             .onChange((value: string) => {
@@ -3051,6 +3227,23 @@ struct Index {
         })
       }
 
+      if (this.connected && this.isFullscreen && !this.showRemoteMenu) {
+        Button('⋯')
+          .width(48)
+          .height(48)
+          .fontSize(22)
+          .borderRadius(24)
+          .backgroundColor('#CC000000')
+          .fontColor(Color.White)
+          .position({ top: 16, right: 16 })
+          .onClick(() => {
+            this.showRemoteMenu = true;
+          })
+      }
+
+      if (this.connected && this.showRemoteMenu) {
+        this.RemoteMenu()
+      }
 
     }
     .width('100%')
