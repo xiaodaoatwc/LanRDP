@@ -77,6 +77,7 @@ struct Index {
   @State private isConnecting: boolean = false;
   @State private connected: boolean = false;
   @State private frameImage: image.PixelMap | null = null;
+  private frameBack: image.PixelMap | null = null;
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
   @State private isFullscreen: boolean = false;
@@ -1017,6 +1018,8 @@ struct Index {
     this.frameBusy = false;
     this.frameImage?.release();
     this.frameImage = null;
+    this.frameBack?.release();
+    this.frameBack = null;
     this.frameVersion = 0;
     this.isConnecting = true;
     this.status = '连接中…';
@@ -1096,15 +1099,56 @@ struct Index {
       if (frame.version === this.frameVersion && this.frameImage !== null) {
         return;
       }
-      const options: image.InitializationOptions = {
-        size: { width: frame.width, height: frame.height },
-        pixelFormat: image.PixelMapFormat.BGRA_8888,
-        editable: false,
-        alphaType: image.AlphaType.OPAQUE
-      };
-      const pixelStart = Date.now();
-      const pixelMap = await image.createPixelMap(frame.data, options);
-      const pixelMs = Date.now() - pixelStart;
+      let pixelMs = 0;
+      const needsNewBuffers = this.frameImage === null || this.frameBack === null ||
+        frame.width !== this.frameWidth || frame.height !== this.frameHeight;
+      if (needsNewBuffers) {
+        const options: image.InitializationOptions = {
+          size: { width: frame.width, height: frame.height },
+          pixelFormat: image.PixelMapFormat.BGRA_8888,
+          editable: true,
+          alphaType: image.AlphaType.OPAQUE
+        };
+        const pixelStart = Date.now();
+        const front = await image.createPixelMap(frame.data, options);
+        const back = await image.createPixelMap(frame.data, options);
+        pixelMs = Date.now() - pixelStart;
+        if (epoch !== this.sessionEpoch) {
+          front.release();
+          back.release();
+          return;
+        }
+        const after = getSessionInfo();
+        if (after.state !== 2) {
+          front.release();
+          back.release();
+          this.onSessionLost(after.error);
+          return;
+        }
+        this.frameImage?.release();
+        this.frameBack?.release();
+        this.frameImage = front;
+        this.frameBack = back;
+      } else {
+        const target = this.frameBack;
+        const previous = this.frameImage;
+        if (target === null) {
+          return;
+        }
+        const pixelStart = Date.now();
+        await target.writeAllPixelsFromBuffer(frame.data);
+        pixelMs = Date.now() - pixelStart;
+        if (epoch !== this.sessionEpoch) {
+          return;
+        }
+        const after = getSessionInfo();
+        if (after.state !== 2) {
+          this.onSessionLost(after.error);
+          return;
+        }
+        this.frameImage = target;
+        this.frameBack = previous;
+      }
       this.frameGetTotal += getMs;
       this.framePixelTotal += pixelMs;
       this.frameStatsCount++;
@@ -1114,18 +1158,6 @@ struct Index {
         this.framePixelTotal = 0;
         this.frameStatsCount = 0;
       }
-      if (epoch !== this.sessionEpoch) {
-        pixelMap.release();
-        return;
-      }
-      const after = getSessionInfo();
-      if (after.state !== 2) {
-        pixelMap.release();
-        this.onSessionLost(after.error);
-        return;
-      }
-      const old = this.frameImage;
-      this.frameImage = pixelMap;
       this.frameVersion = frame.version;
       this.frameWidth = frame.width;
       this.frameHeight = frame.height;
@@ -1140,7 +1172,7 @@ struct Index {
         this.fpsStart = now;
       }
       this.status = `已连接 · ${frame.width}×${frame.height} · ${this.scalePercent()} · ${this.frameFps}fps`;
-      old?.release();
+
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
     } finally {
@@ -1160,6 +1192,8 @@ struct Index {
     this.frameBusy = false;
     this.frameImage?.release();
     this.frameImage = null;
+    this.frameBack?.release();
+    this.frameBack = null;
     this.frameVersion = 0;
     this.connected = false;
     this.fpsFrames = 0;
@@ -1715,6 +1749,8 @@ struct Index {
     this.frameBusy = false;
     this.frameImage?.release();
     this.frameImage = null;
+    this.frameBack?.release();
+    this.frameBack = null;
     this.frameVersion = 0;
     this.viewScale = 1;
     this.viewOffsetX = 0;
