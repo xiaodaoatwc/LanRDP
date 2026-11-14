@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { display, KeyboardAvoidMode, window } from '@kit.ArkUI';
+import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
@@ -399,13 +399,17 @@ struct Index {
     return profile.port.length > 0 && profile.port !== '3389' ? `${name}:${profile.port}` : name;
   }
 
-  private startRename(): void {
+  private async startRename(): Promise<void> {
     if (this.selectedConnectionId.length === 0) {
-      this.status = '请先选择连接记录';
+      await this.saveCurrentProfile(false);
+    }
+    if (this.selectedConnectionId.length === 0) {
+      promptAction.showToast({ message: '请先填写主机名或 IP' });
       return;
     }
     const profile = this.savedConnections.find((item: SavedConnection) => item.id === this.selectedConnectionId);
     if (!profile) {
+      promptAction.showToast({ message: '连接记录不存在，请重新保存' });
       return;
     }
     this.renameText = profile.name !== undefined && profile.name.length > 0
@@ -562,7 +566,7 @@ struct Index {
   private async deleteSelectedProfile(): Promise<void> {
     const id = this.selectedConnectionId;
     if (id.length === 0) {
-      this.status = '请先选择连接记录';
+      promptAction.showToast({ message: '请先选择连接记录' });
       return;
     }
     this.savedConnections = this.savedConnections.filter((item: SavedConnection) => item.id !== id);
