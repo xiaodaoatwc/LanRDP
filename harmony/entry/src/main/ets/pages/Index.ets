@@ -53,6 +53,10 @@ struct Index {
   @State private selectedConnectionId: string = '';
   @State private homeSection: number = 0;
   @State private showEditor: boolean = false;
+  @State private showPasswordPrompt: boolean = false;
+  @State private promptProfileId: string = '';
+  @State private promptPassword: string = '';
+  @State private promptRemember: boolean = false;
   @State private editorName: string = '';
   @State private searchText: string = '';
   @State private renamingProfile: boolean = false;
@@ -496,16 +500,64 @@ struct Index {
     }
   }
 
-  private async connectConnection(profile: SavedConnection): Promise<void> {
-    await this.applyProfile(profile);
-    if (this.password.length === 0) {
-      this.showEditor = true;
-      this.setEditorKeyboardMode();
-      this.status = '请输入密码';
+  private promptProfile(): SavedConnection | null {
+    return this.savedConnections.find((item: SavedConnection) => item.id === this.promptProfileId) ?? null;
+  }
+
+  private promptSubtitle(): string {
+    const profile = this.promptProfile();
+    if (profile === null) {
+      return '';
+    }
+    const user = profile.username.length > 0 ? profile.username : '直接输入';
+    return `${user} @ ${profile.host}:${profile.port}`;
+  }
+
+  private openPasswordPrompt(profile: SavedConnection): void {
+    this.promptProfileId = profile.id;
+    this.promptPassword = '';
+    this.promptRemember = profile.savePassword;
+    this.showEditor = false;
+    this.showPasswordPrompt = true;
+    this.status = '请输入密码';
+    this.setEditorKeyboardMode();
+  }
+
+  private closePasswordPrompt(): void {
+    this.showPasswordPrompt = false;
+    this.promptPassword = '';
+    this.setRemoteKeyboardMode();
+  }
+
+  private async confirmPasswordAndConnect(): Promise<void> {
+    const profile = this.promptProfile();
+    if (profile === null) {
+      this.closePasswordPrompt();
+      return;
+    }
+    if (this.promptPassword.length === 0) {
       promptAction.showToast({ message: '请输入密码' });
       return;
     }
-    this.closeEditor();
+    await this.applyProfile(profile);
+    this.password = this.promptPassword;
+    this.savePassword = this.promptRemember;
+    this.closePasswordPrompt();
+    await this.saveCurrentProfile(false);
+    await this.doConnect();
+    if (!this.connected) {
+      promptAction.showToast({ message: this.status });
+    }
+  }
+
+  private async connectConnection(profile: SavedConnection): Promise<void> {
+    await this.applyProfile(profile);
+    if (this.password.length === 0) {
+      this.openPasswordPrompt(profile);
+      return;
+    }
+    this.showEditor = false;
+    this.setRemoteKeyboardMode();
     await this.doConnect();
     if (!this.connected) {
       promptAction.showToast({ message: this.status });
@@ -2069,20 +2121,103 @@ struct Index {
   }
 
   @Builder
-  HomeShell() {
-    Row() {
-      this.Sidebar()
-      Column() {
-        if (this.showEditor) {
-          this.EditorPage()
-        } else if (this.homeSection === 1) {
-          this.SettingsPage()
-        } else {
-          this.HomePage()
+  PasswordPrompt() {
+    Column() {
+      Column({ space: 14 }) {
+        Text('输入密码')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1C1C1E')
+          .width('100%')
+        Text(this.promptSubtitle())
+          .fontSize(12)
+          .fontColor('#8E8E93')
+          .width('100%')
+
+        TextInput({ placeholder: '密码', text: this.promptPassword })
+          .type(InputType.Password)
+          .height(42)
+          .fontSize(13)
+          .backgroundColor('#F7F7FA')
+          .borderRadius(8)
+          .defaultFocus(true)
+          .onChange((value: string) => {
+            this.promptPassword = value;
+          })
+          .onSubmit(() => {
+            this.confirmPasswordAndConnect();
+          })
+          .width('100%')
+
+        Row({ space: 8 }) {
+          Toggle({ type: ToggleType.Switch, isOn: this.promptRemember })
+            .onChange((isOn: boolean) => {
+              this.promptRemember = isOn;
+            })
+          Text('记住密码')
+            .fontSize(13)
+            .fontColor('#374151')
+          Text('可选，不勾选则仅本次使用')
+            .fontSize(11)
+            .fontColor('#9CA3AF')
+            .layoutWeight(1)
         }
+        .width('100%')
+
+        Row({ space: 10 }) {
+          Button('取消')
+            .fontSize(13)
+            .onClick(() => {
+              this.closePasswordPrompt();
+            })
+          Blank()
+          Button('连接')
+            .fontSize(13)
+            .backgroundColor('#0A84FF')
+            .fontColor(Color.White)
+            .onClick(() => {
+              this.confirmPasswordAndConnect();
+            })
+        }
+        .width('100%')
       }
-      .layoutWeight(1)
+      .width('90%')
+      .constraintSize({ maxWidth: 420 })
+      .padding(24)
+      .backgroundColor(Color.White)
+      .borderRadius(18)
+      .shadow({ radius: 30, color: '#00000033', offsetX: 0, offsetY: 10 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#00000055')
+  }
+
+  @Builder
+  HomeShell() {
+    Stack() {
+      Row() {
+        this.Sidebar()
+        Column() {
+          if (this.showEditor) {
+            this.EditorPage()
+          } else if (this.homeSection === 1) {
+            this.SettingsPage()
+          } else {
+            this.HomePage()
+          }
+        }
+        .layoutWeight(1)
+        .height('100%')
+      }
+      .width('100%')
       .height('100%')
+
+      if (this.showPasswordPrompt) {
+        this.PasswordPrompt()
+      }
     }
     .width('100%')
     .height('100%')
