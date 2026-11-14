@@ -1167,6 +1167,7 @@ struct Index {
         this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
         this.mouseDown = false;
       }
+      this.touchMoved = true;
       const second = event.touches[1];
       const secondX = second.windowX - this.imageGlobalX;
       const secondY = second.windowY - this.imageGlobalY;
@@ -1235,7 +1236,7 @@ struct Index {
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
       const held = Date.now() - this.touchStartTime;
-      if (!this.longPressTriggered && event.source === SourceType.TouchScreen && held > 650 && !this.touchMoved) {
+      if (this.mouseDown && !this.longPressTriggered && event.source === SourceType.TouchScreen && held > 650 && !this.touchMoved) {
         this.sendMouseAt(touchX, touchY, false, 1);
         this.sendMouseAt(touchX, touchY, true, 2);
         this.sendMouseAt(touchX, touchY, false, 2);
