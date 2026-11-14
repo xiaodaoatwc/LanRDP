@@ -1,4 +1,5 @@
 import { image } from '@kit.ImageKit';
+import { inputMethod } from '@kit.IMEKit';
 import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
@@ -135,6 +136,13 @@ struct Index {
   private twoFingerStartY: number = 0;
   private twoFingerLastX: number = 0;
   private twoFingerLastY: number = 0;
+  private twoFingerTapX: number = 0;
+  private twoFingerTapY: number = 0;
+  private firstFingerX: number = 0;
+  private firstFingerY: number = 0;
+  private touchTapPending: boolean = false;
+  private touchStartX: number = 0;
+  private touchStartY: number = 0;
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
@@ -196,6 +204,18 @@ struct Index {
   private closeEditor(): void {
     this.showEditor = false;
     this.setRemoteKeyboardMode();
+  }
+
+  private focusPromptPassword(): void {
+    setTimeout(() => {
+      try {
+        this.getUIContext().getFocusController().requestFocus('promptPassword');
+        inputMethod.getController().showSoftKeyboard().catch(() => {
+        });
+      } catch (error) {
+        console.info(`LanRDP focus prompt failed: ${String(error)}`);
+      }
+    }, 180);
   }
 
   private focusRemoteKeyboard(): void {
@@ -719,6 +739,7 @@ struct Index {
     this.showPasswordPrompt = true;
     this.status = '请输入密码';
     this.setEditorKeyboardMode();
+    this.focusPromptPassword();
   }
 
   private closePasswordPrompt(): void {
@@ -1108,8 +1129,8 @@ struct Index {
   private finishTwoFingerGesture(): void {
     if (this.twoFingerActive && this.twoFingerTapCandidate && !this.twoFingerScroll &&
         Date.now() - this.twoFingerStartTime < 250) {
-      this.sendMouseAt(this.twoFingerLastX, this.twoFingerLastY, true, 2);
-      this.sendMouseAt(this.twoFingerLastX, this.twoFingerLastY, false, 2);
+      this.sendMouseAt(this.twoFingerTapX, this.twoFingerTapY, true, 2);
+      this.sendMouseAt(this.twoFingerTapX, this.twoFingerTapY, false, 2);
     }
     this.twoFingerActive = false;
     this.twoFingerTapCandidate = false;
@@ -1120,9 +1141,18 @@ struct Index {
     if (event.touches.length === 0) {
       this.finishTwoFingerGesture();
       this.cancelLongPress();
-      if (this.mouseDown && !this.longPressTriggered) {
+      if (this.touchTapPending) {
+        if (event.source === SourceType.TouchScreen && Date.now() - this.touchStartTime > 650) {
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, true, 2);
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 2);
+        } else {
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, true);
+          this.sendMouseAt(this.lastTouchX, this.lastTouchY, false);
+        }
+      } else if (this.mouseDown && !this.longPressTriggered) {
         this.sendMouseAt(this.lastTouchX, this.lastTouchY, false);
       }
+      this.touchTapPending = false;
       this.mouseDown = false;
       this.longPressTriggered = false;
       this.lastWheelY = -1;
@@ -1167,6 +1197,7 @@ struct Index {
         this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
         this.mouseDown = false;
       }
+      this.touchTapPending = false;
       this.touchMoved = true;
       const second = event.touches[1];
       const secondX = second.windowX - this.imageGlobalX;
@@ -1180,6 +1211,8 @@ struct Index {
         this.twoFingerStartTime = Date.now();
         this.twoFingerStartX = averageX;
         this.twoFingerStartY = averageY;
+        this.twoFingerTapX = this.firstFingerX;
+        this.twoFingerTapY = this.firstFingerY;
       }
       this.twoFingerLastX = averageX;
       this.twoFingerLastY = averageY;
@@ -1206,24 +1239,38 @@ struct Index {
       }
       this.lastWheelY = -1;
       this.lastClickY = touchY;
-      this.mouseDown = true;
+      this.touchStartX = touchX;
+      this.touchStartY = touchY;
+      this.firstFingerX = touchX;
+      this.firstFingerY = touchY;
+      this.touchTapPending = true;
+      this.mouseDown = false;
       this.touchMoved = false;
       this.longPressTriggered = false;
       this.touchStartTime = Date.now();
-      this.sendMouseAt(touchX, touchY, true);
 
       this.cancelLongPress();
       if (event.source === SourceType.TouchScreen) {
         this.longPressTimer = setTimeout(() => {
-          if (this.mouseDown && !this.touchMoved && !this.longPressTriggered) {
-            this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
+          if (this.touchTapPending && !this.touchMoved && !this.longPressTriggered && !this.twoFingerActive) {
+            this.touchTapPending = false;
             this.sendMouseAt(this.lastTouchX, this.lastTouchY, true, 2);
             this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 2);
             this.longPressTriggered = true;
           }
         }, 650);
       }
-    } else if (event.type === TouchType.Move && this.mouseDown) {
+    } else if (event.type === TouchType.Move && (this.mouseDown || this.touchTapPending)) {
+      if (this.touchTapPending) {
+        if (Math.abs(touchX - this.touchStartX) <= 4 && Math.abs(touchY - this.touchStartY) <= 4) {
+          return;
+        }
+        this.touchTapPending = false;
+        this.mouseDown = true;
+        this.touchMoved = true;
+        this.cancelLongPress();
+        this.sendMouseAt(this.touchStartX, this.touchStartY, true);
+      }
       if (Math.abs(touchX - previousX) > 6 || Math.abs(touchY - previousY) > 6) {
         this.touchMoved = true;
       }
@@ -1236,13 +1283,18 @@ struct Index {
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
       const held = Date.now() - this.touchStartTime;
-      if (this.mouseDown && !this.longPressTriggered && event.source === SourceType.TouchScreen && held > 650 && !this.touchMoved) {
-        this.sendMouseAt(touchX, touchY, false, 1);
-        this.sendMouseAt(touchX, touchY, true, 2);
-        this.sendMouseAt(touchX, touchY, false, 2);
-      } else if (!this.longPressTriggered) {
+      if (this.touchTapPending) {
+        if (event.source === SourceType.TouchScreen && held > 650) {
+          this.sendMouseAt(touchX, touchY, true, 2);
+          this.sendMouseAt(touchX, touchY, false, 2);
+        } else {
+          this.sendMouseAt(touchX, touchY, true);
+          this.sendMouseAt(touchX, touchY, false);
+        }
+      } else if (this.mouseDown && !this.longPressTriggered) {
         this.sendMouseAt(touchX, touchY, false);
       }
+      this.touchTapPending = false;
       this.mouseDown = false;
       this.longPressTriggered = false;
       this.lastWheelY = -1;
@@ -2477,6 +2529,7 @@ struct Index {
           .fontSize(13)
           .backgroundColor('#F7F7FA')
           .borderRadius(8)
+          .id('promptPassword')
           .defaultFocus(true)
           .onChange((value: string) => {
             this.promptPassword = value;
