@@ -1105,7 +1105,7 @@ struct Index {
         const options: image.InitializationOptions = {
           size: { width: frame.width, height: frame.height },
           pixelFormat: image.PixelMapFormat.BGRA_8888,
-          editable: false,
+          editable: true,
           alphaType: image.AlphaType.OPAQUE
         };
         const pixelStart = Date.now();
