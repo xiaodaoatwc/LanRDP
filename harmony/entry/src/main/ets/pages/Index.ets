@@ -103,6 +103,9 @@ struct Index {
   private panLastY: number = 0;
   private panMoved: boolean = false;
   private pinchStartScale: number = 1;
+  private pinchEngaged: boolean = false;
+  private pinchAnchorScale: number = 1;
+  private pinchAnchorRatio: number = 1;
   private imageGlobalX: number = 0;
   private imageGlobalY: number = 0;
   private touchStartTime: number = 0;
@@ -1104,7 +1107,7 @@ struct Index {
 
   private finishTwoFingerGesture(): void {
     if (this.twoFingerActive && this.twoFingerTapCandidate && !this.twoFingerScroll &&
-        Date.now() - this.twoFingerStartTime < 350) {
+        Date.now() - this.twoFingerStartTime < 250) {
       this.sendMouseAt(this.twoFingerLastX, this.twoFingerLastY, true, 2);
       this.sendMouseAt(this.twoFingerLastX, this.twoFingerLastY, false, 2);
     }
@@ -1171,7 +1174,7 @@ struct Index {
       this.twoFingerLastY = averageY;
       const dx = averageX - this.twoFingerStartX;
       const dy = averageY - this.twoFingerStartY;
-      if (Math.sqrt(dx * dx + dy * dy) > 12) {
+      if (Math.sqrt(dx * dx + dy * dy) > 30) {
         this.twoFingerScroll = true;
       }
       this.lastWheelY = -1;
@@ -1179,7 +1182,6 @@ struct Index {
     }
 
     if (this.twoFingerActive) {
-      this.finishTwoFingerGesture();
       return;
     }
 
@@ -1205,7 +1207,7 @@ struct Index {
             this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 2);
             this.longPressTriggered = true;
           }
-        }, 550);
+        }, 650);
       }
     } else if (event.type === TouchType.Move && this.mouseDown) {
       if (Math.abs(touchX - previousX) > 6 || Math.abs(touchY - previousY) > 6) {
@@ -1220,7 +1222,7 @@ struct Index {
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
       const held = Date.now() - this.touchStartTime;
-      if (!this.longPressTriggered && event.source === SourceType.TouchScreen && held > 550 && !this.touchMoved) {
+      if (!this.longPressTriggered && event.source === SourceType.TouchScreen && held > 650 && !this.touchMoved) {
         this.sendMouseAt(touchX, touchY, false, 1);
         this.sendMouseAt(touchX, touchY, true, 2);
         this.sendMouseAt(touchX, touchY, false, 2);
@@ -2637,6 +2639,12 @@ struct Index {
               .onClick(() => {
                 this.keyStyle = (this.keyStyle + 1) % 2;
               })
+            Button('复位')
+              .fontSize(12)
+              .onClick(() => {
+                this.viewScale = 1;
+                this.viewOffsetY = 0;
+              })
             Button('断开')
               .fontSize(12)
               .onClick(() => {
@@ -2668,7 +2676,9 @@ struct Index {
             })
             .onMouse((event: MouseEvent) => {
               if (event.action === MouseAction.Move) {
-                this.sendMouseMoveAt(event.x, event.y, 0);
+                if (!this.mouseDown) {
+                  this.sendMouseMoveAt(event.x, event.y, 0);
+                }
                 return;
               }
               if (event.button === MouseButton.Right) {
@@ -2713,12 +2723,26 @@ struct Index {
                 PinchGesture({ fingers: 2 })
                   .onActionStart(() => {
                     this.pinchStartScale = this.viewScale;
+                    this.pinchEngaged = false;
+                    this.pinchAnchorScale = this.viewScale;
+                    this.pinchAnchorRatio = 1;
                   })
                   .onActionUpdate((event: GestureEvent) => {
-                    if (Math.abs(event.scale - 1) > 0.01) {
+                    const ratio = event.scale;
+                    if (!this.pinchEngaged) {
+                      if (Math.abs(ratio - 1) < 0.15) {
+                        return;
+                      }
+                      this.pinchEngaged = true;
+                      this.pinchAnchorScale = this.viewScale;
+                      this.pinchAnchorRatio = ratio;
                       this.twoFingerScroll = true;
                     }
-                    this.viewScale = Math.max(0.5, Math.min(3, this.pinchStartScale * event.scale));
+                    this.viewScale = Math.max(0.8, Math.min(2,
+                      this.pinchAnchorScale * (ratio / this.pinchAnchorRatio)));
+                  })
+                  .onActionEnd(() => {
+                    this.pinchEngaged = false;
                   })
               )
             )
