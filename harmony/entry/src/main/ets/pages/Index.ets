@@ -78,6 +78,7 @@ struct Index {
   @State private connected: boolean = false;
   @State private frameImage: image.PixelMap | null = null;
   @State private frameVersion: number = 0;
+  @State private frameFps: number = 0;
   @State private frameWidth: number = 0;
   @State private frameHeight: number = 0;
   @State private imageViewWidth: number = 0;
@@ -120,6 +121,8 @@ struct Index {
   private mouseDown: boolean = false;
   private timer: number = -1;
   private frameBusy: boolean = false;
+  private fpsFrames: number = 0;
+  private fpsStart: number = 0;
   private sessionEpoch: number = 0;
   private longPressTimer: number = -1;
   private longPressTriggered: boolean = false;
@@ -1021,13 +1024,16 @@ struct Index {
       if (result === 'connected') {
         console.info('LanRDP connect ok');
         this.connected = true;
+        this.fpsFrames = 0;
+        this.fpsStart = 0;
+        this.frameFps = 0;
         this.status = '连接成功，等待画面…';
         setTimeout(() => {
           this.focusRemoteKeyboard();
         }, 50);
         this.timer = setInterval(() => {
           this.refreshFrame();
-        }, 33);
+        }, 16);
         this.saveConnectionSettings();
         this.saveCurrentProfile();
       } else {
@@ -1095,7 +1101,17 @@ struct Index {
       this.frameVersion = frame.version;
       this.frameWidth = frame.width;
       this.frameHeight = frame.height;
-      this.status = `已连接 · ${frame.width}×${frame.height} · ${this.scalePercent()}`;
+      const now = Date.now();
+      if (this.fpsStart === 0) {
+        this.fpsStart = now;
+      }
+      this.fpsFrames++;
+      if (now - this.fpsStart >= 1000) {
+        this.frameFps = Math.round(this.fpsFrames * 1000 / (now - this.fpsStart));
+        this.fpsFrames = 0;
+        this.fpsStart = now;
+      }
+      this.status = `已连接 · ${frame.width}×${frame.height} · ${this.scalePercent()} · ${this.frameFps}fps`;
       old?.release();
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
@@ -1117,6 +1133,9 @@ struct Index {
     this.frameImage = null;
     this.frameVersion = 0;
     this.connected = false;
+    this.fpsFrames = 0;
+    this.fpsStart = 0;
+    this.frameFps = 0;
     this.inputFocused = false;
     this.mouseDown = false;
     this.longPressTriggered = false;
