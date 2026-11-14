@@ -89,6 +89,7 @@ struct Index {
   @State private targetFrameRate: number = 60;
   @State private isFullscreen: boolean = false;
   @State private showRemoteMenu: boolean = false;
+  @State private showXTest: boolean = false;
   @State private frameWidth: number = 0;
   @State private frameHeight: number = 0;
   @State private imageViewWidth: number = 0;
@@ -2974,6 +2975,12 @@ struct Index {
               this.viewOffsetX = 0;
               this.viewOffsetY = 0;
             })
+          Button(this.showXTest ? '关X' : 'X测试')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.showXTest = !this.showXTest;
+            })
           Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
             .fontSize(12)
             .layoutWeight(1)
@@ -3076,6 +3083,11 @@ struct Index {
                 this.viewOffsetX = 0;
                 this.viewOffsetY = 0;
               })
+            Button('X测试')
+              .fontSize(11)
+              .onClick(() => {
+                this.showXTest = !this.showXTest;
+              })
             Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
               .fontSize(12)
               .onClick(() => {
@@ -3107,6 +3119,16 @@ struct Index {
               .enableAnalyzer(false)
               .backgroundColor(Color.Transparent)
               .offset({ x: this.viewOffsetX, y: this.viewOffsetY })
+
+            if (this.showXTest) {
+              XComponent({
+                id: 'xcomponentId',
+                type: XComponentType.SURFACE,
+                libraryname: 'lanrdp'
+              })
+                .width('100%')
+                .height('100%')
+            }
           }
           .width('100%')
           .layoutWeight(1)

@@ -4,11 +4,17 @@
 #include <freerdp/settings.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
+#include <ace/xcomponent/native_interface_xcomponent.h>
+#include <EGL/egl.h>
+#include <GLES3/gl3.h>
+#include <native_window/external_window.h>
 #include "multimedia/image_framework/image_pixel_map_mdk.h"
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -943,6 +949,149 @@ static napi_value SendMouseMove(napi_env env, napi_callback_info info)
     return result;
 }
 
+struct XTestRenderer {
+    std::atomic<bool> running{ false };
+    std::atomic<int> width{ 1280 };
+    std::atomic<int> height{ 800 };
+    std::thread thread;
+
+    void Start(void* window)
+    {
+        Stop();
+        running.store(true);
+        thread = std::thread(&XTestRenderer::RenderLoop, this, window);
+    }
+
+    void Stop()
+    {
+        running.store(false);
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
+    void SetSize(int w, int h)
+    {
+        if (w > 0 && h > 0) {
+            width.store(w);
+            height.store(h);
+        }
+    }
+
+    void RenderLoop(void* window)
+    {
+        EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (display == EGL_NO_DISPLAY) {
+            return;
+        }
+        if (!eglInitialize(display, nullptr, nullptr)) {
+            return;
+        }
+        const EGLint configAttribs[] = {
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+            EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+            EGL_NONE
+        };
+        EGLConfig config = nullptr;
+        EGLint numConfigs = 0;
+        if (!eglChooseConfig(display, configAttribs, &config, 1, &numConfigs) || numConfigs < 1) {
+            eglTerminate(display);
+            return;
+        }
+        EGLSurface surface = eglCreateWindowSurface(display, config,
+            reinterpret_cast<EGLNativeWindowType>(window), nullptr);
+        if (surface == EGL_NO_SURFACE) {
+            eglTerminate(display);
+            return;
+        }
+        const EGLint contextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+        EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
+        if (context == EGL_NO_CONTEXT) {
+            eglDestroySurface(display, surface);
+            eglTerminate(display);
+            return;
+        }
+        if (!eglMakeCurrent(display, surface, surface, context)) {
+            eglDestroyContext(display, context);
+            eglDestroySurface(display, surface);
+            eglTerminate(display);
+            return;
+        }
+        eglSwapInterval(display, 1);
+        const auto start = std::chrono::steady_clock::now();
+        while (running.load()) {
+            const int w = width.load();
+            const int h = height.load();
+            glViewport(0, 0, w, h);
+            glDisable(GL_SCISSOR_TEST);
+            glClearColor(0.05f, 0.07f, 0.10f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            const auto now = std::chrono::steady_clock::now();
+            const double seconds = std::chrono::duration<double>(now - start).count();
+            const int barWidth = std::max(40, w / 12);
+            const int travel = std::max(1, w + barWidth);
+            int x = static_cast<int>(seconds * 240.0) % travel - barWidth;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(x, 0, barWidth, h);
+            glClearColor(0.10f, 0.65f, 1.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDisable(GL_SCISSOR_TEST);
+            if (!eglSwapBuffers(display, surface)) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroyContext(display, context);
+        eglDestroySurface(display, surface);
+        eglTerminate(display);
+    }
+};
+
+static XTestRenderer g_xTestRenderer;
+
+static void OnXSurfaceCreated(OH_NativeXComponent* component, void* window)
+{
+    uint64_t width = 0;
+    uint64_t height = 0;
+    if (component && window) {
+        OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
+        g_xTestRenderer.SetSize(static_cast<int>(width), static_cast<int>(height));
+        g_xTestRenderer.Start(window);
+    }
+}
+
+static void OnXSurfaceChanged(OH_NativeXComponent* component, void* window)
+{
+    uint64_t width = 0;
+    uint64_t height = 0;
+    if (component && window) {
+        OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
+        g_xTestRenderer.SetSize(static_cast<int>(width), static_cast<int>(height));
+    }
+}
+
+static void OnXSurfaceDestroyed(OH_NativeXComponent* component, void* window)
+{
+    (void)component;
+    (void)window;
+    g_xTestRenderer.Stop();
+}
+
+static void OnXDispatchTouch(OH_NativeXComponent* component, void* window)
+{
+    (void)component;
+    (void)window;
+}
+
+static OH_NativeXComponent_Callback g_xComponentCallback = {
+    OnXSurfaceCreated,
+    OnXSurfaceChanged,
+    OnXSurfaceDestroyed,
+    OnXDispatchTouch
+};
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -964,6 +1113,14 @@ static napi_value Init(napi_env env, napi_value exports)
         { "sendMouseMove", nullptr, SendMouseMove, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
+    napi_value exportInstance = nullptr;
+    if (napi_get_named_property(env, exports, OH_NATIVE_XCOMPONENT_OBJ, &exportInstance) == napi_ok) {
+        OH_NativeXComponent* nativeXComponent = nullptr;
+        napi_unwrap(env, exportInstance, reinterpret_cast<void**>(&nativeXComponent));
+        if (nativeXComponent) {
+            OH_NativeXComponent_RegisterCallback(nativeXComponent, &g_xComponentCallback);
+        }
+    }
     return exports;
 }
 EXTERN_C_END
