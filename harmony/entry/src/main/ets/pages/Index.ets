@@ -138,6 +138,8 @@ struct Index {
   private frameGetTotal: number = 0;
   private framePixelTotal: number = 0;
   private frameStatsCount: number = 0;
+  private lastNativeStatsAt: number = 0;
+  private lastNativeVersion: number = 0;
   private sessionEpoch: number = 0;
   private longPressTimer: number = -1;
   private longPressTriggered: boolean = false;
@@ -1132,6 +1134,16 @@ struct Index {
           this.frameWidth = info.width;
           this.frameHeight = info.height;
           this.noteFrameRendered(info.width, info.height);
+          const now = Date.now();
+          if (this.lastNativeStatsAt === 0) {
+            this.lastNativeStatsAt = now;
+            this.lastNativeVersion = info.version;
+          } else if (now - this.lastNativeStatsAt >= 1000) {
+            const produced = info.version - this.lastNativeVersion;
+            console.info(`LanRDP native stats display=${this.frameFps} produced=${produced} write=${info.nativeWriteMs.toFixed(1)}ms index=${info.frameIndex}`);
+            this.lastNativeStatsAt = now;
+            this.lastNativeVersion = info.version;
+          }
           const ackIndex = info.frameIndex;
           setTimeout(() => {
             ackFrame(ackIndex);
@@ -1199,6 +1211,8 @@ struct Index {
             this.nativeBack = middle;
             this.nativeExtra = extra;
             this.nativeFrameMode = true;
+            this.lastNativeStatsAt = 0;
+            this.lastNativeVersion = 0;
           } else {
             extra.release();
             this.frameAux = null;

@@ -18,6 +18,7 @@ export interface SessionInfo {
   height: number;
   frameIndex: number;
   nativeBound: boolean;
+  nativeWriteMs: number;
 }
 export const stopSession: () => boolean;
 export const getSessionInfo: () => SessionInfo;

@@ -84,6 +84,7 @@ struct Session {
     int writeIndex = 1;
     int displayIndex = 0;
     bool nativeBound = false;
+    double nativeWriteMs = 0;
     int width = 0;
     int height = 0;
     uint64_t version = 0;
@@ -186,12 +187,15 @@ static BOOL SessionEndPaint(rdpContext* context)
             session->width == width && session->height == height) {
             void* targetPixels = nullptr;
             if (OH_PixelMap_AccessPixels(target, &targetPixels) == 0 && targetPixels) {
+                const auto writeStart = std::chrono::steady_clock::now();
                 const BOOL copied = freerdp_image_copy(
                     static_cast<BYTE*>(targetPixels), PIXEL_FORMAT_BGRA32,
                     static_cast<UINT32>(targetStride),
                     0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
                     source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
                 OH_PixelMap_UnAccessPixels(target);
+                const auto writeEnd = std::chrono::steady_clock::now();
+                session->nativeWriteMs = std::chrono::duration<double, std::milli>(writeEnd - writeStart).count();
                 if (copied) {
                     session->frameIndex = targetIndex;
                     ++session->version;
@@ -534,6 +538,7 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
     int height = 0;
     int frameIndex = 0;
     bool nativeBound = false;
+    double nativeWriteMs = 0;
     if (g_session) {
         std::lock_guard<std::mutex> frameLock(g_session->mutex);
         state = g_session->state.load();
@@ -543,6 +548,7 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
         height = g_session->height;
         frameIndex = g_session->frameIndex;
         nativeBound = g_session->nativeBound;
+        nativeWriteMs = g_session->nativeWriteMs;
     }
 
     napi_value object;
@@ -553,6 +559,7 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
     napi_value jsHeight;
     napi_value jsFrameIndex;
     napi_value jsNativeBound;
+    napi_value jsNativeWriteMs;
     napi_create_object(env, &object);
     napi_create_int32(env, state, &jsState);
     napi_create_string_utf8(env, error.c_str(), NAPI_AUTO_LENGTH, &jsError);
@@ -561,6 +568,7 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
     napi_create_int32(env, height, &jsHeight);
     napi_create_int32(env, frameIndex, &jsFrameIndex);
     napi_get_boolean(env, nativeBound, &jsNativeBound);
+    napi_create_double(env, nativeWriteMs, &jsNativeWriteMs);
     napi_set_named_property(env, object, "state", jsState);
     napi_set_named_property(env, object, "error", jsError);
     napi_set_named_property(env, object, "version", jsVersion);
@@ -568,6 +576,7 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
     napi_set_named_property(env, object, "height", jsHeight);
     napi_set_named_property(env, object, "frameIndex", jsFrameIndex);
     napi_set_named_property(env, object, "nativeBound", jsNativeBound);
+    napi_set_named_property(env, object, "nativeWriteMs", jsNativeWriteMs);
     return object;
 }
 
