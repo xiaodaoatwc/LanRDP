@@ -4,6 +4,7 @@
 #include <freerdp/settings.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
+#include "multimedia/image_framework/image_pixel_map_mdk.h"
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
 
@@ -69,6 +70,16 @@ struct Session {
     std::thread thread;
     std::mutex mutex;
     std::vector<uint8_t> pixels;
+    napi_env frameEnv = nullptr;
+    napi_ref frontRef = nullptr;
+    napi_ref backRef = nullptr;
+    NativePixelMap* frontNative = nullptr;
+    NativePixelMap* backNative = nullptr;
+    int frontStride = 0;
+    int backStride = 0;
+    int frameIndex = 0;
+    int writeIndex = 1;
+    bool nativeBound = false;
     int width = 0;
     int height = 0;
     uint64_t version = 0;
@@ -85,6 +96,30 @@ struct SessionContext {
 static std::mutex g_sessionMutex;
 static Session* g_session = nullptr;
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
+
+static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
+{
+    if (!session)
+        return;
+    napi_env useEnv = env ? env : session->frameEnv;
+    if (useEnv) {
+        if (session->frontRef) {
+            napi_delete_reference(useEnv, session->frontRef);
+            session->frontRef = nullptr;
+        }
+        if (session->backRef) {
+            napi_delete_reference(useEnv, session->backRef);
+            session->backRef = nullptr;
+        }
+    }
+    session->frontNative = nullptr;
+    session->backNative = nullptr;
+    session->frontStride = 0;
+    session->backStride = 0;
+    session->frameIndex = 0;
+    session->writeIndex = 1;
+    session->nativeBound = false;
+}
 
 static void SetSessionState(Session* session, int state, const std::string& error = {})
 {
@@ -121,6 +156,29 @@ static BOOL SessionEndPaint(rdpContext* context)
 
     const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
+    if (session->nativeBound) {
+        const bool useFront = session->writeIndex == 0;
+        NativePixelMap* target = useFront ? session->frontNative : session->backNative;
+        const int targetStride = useFront ? session->frontStride : session->backStride;
+        if (target && targetStride >= width * 4 &&
+            session->width == width && session->height == height) {
+            void* targetPixels = nullptr;
+            if (OH_PixelMap_AccessPixels(target, &targetPixels) == 0 && targetPixels) {
+                const BOOL copied = freerdp_image_copy(
+                    static_cast<BYTE*>(targetPixels), PIXEL_FORMAT_BGRA32,
+                    static_cast<UINT32>(targetStride),
+                    0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+                    source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+                OH_PixelMap_UnAccessPixels(target);
+                if (copied) {
+                    session->frameIndex = session->writeIndex;
+                    session->writeIndex = 1 - session->writeIndex;
+                    ++session->version;
+                    return TRUE;
+                }
+            }
+        }
+    }
     session->pixels.resize(static_cast<size_t>(width) * height * 4);
     const BOOL converted = freerdp_image_copy(
         session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
@@ -453,6 +511,8 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
     uint64_t version = 0;
     int width = 0;
     int height = 0;
+    int frameIndex = 0;
+    bool nativeBound = false;
     if (g_session) {
         std::lock_guard<std::mutex> frameLock(g_session->mutex);
         state = g_session->state.load();
@@ -460,6 +520,8 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
         version = g_session->version;
         width = g_session->width;
         height = g_session->height;
+        frameIndex = g_session->frameIndex;
+        nativeBound = g_session->nativeBound;
     }
 
     napi_value object;
@@ -468,18 +530,96 @@ static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
     napi_value jsVersion;
     napi_value jsWidth;
     napi_value jsHeight;
+    napi_value jsFrameIndex;
+    napi_value jsNativeBound;
     napi_create_object(env, &object);
     napi_create_int32(env, state, &jsState);
     napi_create_string_utf8(env, error.c_str(), NAPI_AUTO_LENGTH, &jsError);
     napi_create_double(env, static_cast<double>(version), &jsVersion);
     napi_create_int32(env, width, &jsWidth);
     napi_create_int32(env, height, &jsHeight);
+    napi_create_int32(env, frameIndex, &jsFrameIndex);
+    napi_get_boolean(env, nativeBound, &jsNativeBound);
     napi_set_named_property(env, object, "state", jsState);
     napi_set_named_property(env, object, "error", jsError);
     napi_set_named_property(env, object, "version", jsVersion);
     napi_set_named_property(env, object, "width", jsWidth);
     napi_set_named_property(env, object, "height", jsHeight);
+    napi_set_named_property(env, object, "frameIndex", jsFrameIndex);
+    napi_set_named_property(env, object, "nativeBound", jsNativeBound);
     return object;
+}
+
+static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    napi_value result;
+    napi_get_boolean(env, false, &result);
+    if (argc < 2) {
+        return result;
+    }
+
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    Session* session = g_session;
+    if (!session) {
+        return result;
+    }
+
+    NativePixelMap* front = OH_PixelMap_InitNativePixelMap(env, args[0]);
+    NativePixelMap* back = OH_PixelMap_InitNativePixelMap(env, args[1]);
+    if (!front || !back) {
+        return result;
+    }
+    OhosPixelMapInfos frontInfo = {};
+    OhosPixelMapInfos backInfo = {};
+    int32_t frontStride = 0;
+    int32_t backStride = 0;
+    if (OH_PixelMap_GetImageInfo(front, &frontInfo) != 0 ||
+        OH_PixelMap_GetImageInfo(back, &backInfo) != 0 ||
+        OH_PixelMap_GetBytesNumberPerRow(front, &frontStride) != 0 ||
+        OH_PixelMap_GetBytesNumberPerRow(back, &backStride) != 0) {
+        return result;
+    }
+    if (frontInfo.width <= 0 || frontInfo.height <= 0 ||
+        frontInfo.width != backInfo.width || frontInfo.height != backInfo.height ||
+        frontStride < static_cast<int32_t>(frontInfo.width * 4) ||
+        backStride < static_cast<int32_t>(backInfo.width * 4)) {
+        return result;
+    }
+
+    std::lock_guard<std::mutex> frameLock(session->mutex);
+    UnbindNativePixelMaps(session, env);
+    if (napi_create_reference(env, args[0], 1, &session->frontRef) != napi_ok ||
+        napi_create_reference(env, args[1], 1, &session->backRef) != napi_ok) {
+        UnbindNativePixelMaps(session, env);
+        return result;
+    }
+    session->frameEnv = env;
+    session->frontNative = front;
+    session->backNative = back;
+    session->frontStride = frontStride;
+    session->backStride = backStride;
+    session->frameIndex = 0;
+    session->writeIndex = 1;
+    session->nativeBound = true;
+    napi_get_boolean(env, true, &result);
+    return result;
+}
+
+static napi_value UnbindFrameMaps(napi_env env, napi_callback_info info)
+{
+    (void)info;
+    napi_value result;
+    napi_get_boolean(env, true, &result);
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    Session* session = g_session;
+    if (session) {
+        std::lock_guard<std::mutex> frameLock(session->mutex);
+        UnbindNativePixelMaps(session, env);
+    }
+    return result;
 }
 
 static napi_value GetFrame(napi_env env, napi_callback_info info)
@@ -697,6 +837,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "stopSession", nullptr, StopSession, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "getSessionInfo", nullptr, GetSessionInfo, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "bindFrameMaps", nullptr, BindFrameMaps, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "unbindFrameMaps", nullptr, UnbindFrameMaps, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr },

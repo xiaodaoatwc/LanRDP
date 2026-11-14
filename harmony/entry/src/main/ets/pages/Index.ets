@@ -4,7 +4,7 @@ import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+import { bindFrameMaps, connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -78,6 +78,9 @@ struct Index {
   @State private connected: boolean = false;
   @State private frameImage: image.PixelMap | null = null;
   private frameBack: image.PixelMap | null = null;
+  private nativeFront: image.PixelMap | null = null;
+  private nativeBack: image.PixelMap | null = null;
+  private nativeFrameMode: boolean = false;
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
   @State private isFullscreen: boolean = false;
@@ -213,6 +216,15 @@ struct Index {
 
   private setRemoteKeyboardMode(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+  }
+
+  private disableNativeFrames(): void {
+    if (this.nativeFrameMode) {
+      unbindFrameMaps();
+      this.nativeFrameMode = false;
+      this.nativeFront = null;
+      this.nativeBack = null;
+    }
   }
 
   private closeEditor(): void {
@@ -1067,6 +1079,20 @@ struct Index {
     }
   }
 
+  private noteFrameRendered(width: number, height: number): void {
+    const now = Date.now();
+    if (this.fpsStart === 0) {
+      this.fpsStart = now;
+    }
+    this.fpsFrames++;
+    if (now - this.fpsStart >= 1000) {
+      this.frameFps = Math.round(this.fpsFrames * 1000 / (now - this.fpsStart));
+      this.fpsFrames = 0;
+      this.fpsStart = now;
+    }
+    this.status = `已连接 · ${width}×${height} · ${this.scalePercent()} · ${this.frameFps}fps`;
+  }
+
   private async refreshFrame(): Promise<void> {
     if (this.isConnecting || this.frameBusy) {
       return;
@@ -1081,6 +1107,23 @@ struct Index {
       return;
     }
     if (info.state !== 2) {
+      return;
+    }
+    if (this.nativeFrameMode) {
+      if (!info.nativeBound) {
+        this.nativeFrameMode = false;
+        return;
+      }
+      if (info.version !== this.frameVersion) {
+        const target = info.frameIndex === 0 ? this.nativeFront : this.nativeBack;
+        if (target !== null) {
+          this.frameImage = target;
+          this.frameVersion = info.version;
+          this.frameWidth = info.width;
+          this.frameHeight = info.height;
+          this.noteFrameRendered(info.width, info.height);
+        }
+      }
       return;
     }
     if (info.version === this.frameVersion && this.frameImage !== null) {
@@ -1129,6 +1172,15 @@ struct Index {
         this.frameBack?.release();
         this.frameImage = front;
         this.frameBack = back;
+        if (!this.nativeFrameMode) {
+          const bound = bindFrameMaps(front, back);
+          console.info(`LanRDP native frames bound=${bound}`);
+          if (bound) {
+            this.nativeFront = front;
+            this.nativeBack = back;
+            this.nativeFrameMode = true;
+          }
+        }
       } else {
         const target = this.frameBack;
         const previous = this.frameImage;
@@ -1161,17 +1213,7 @@ struct Index {
       this.frameVersion = frame.version;
       this.frameWidth = frame.width;
       this.frameHeight = frame.height;
-      const now = Date.now();
-      if (this.fpsStart === 0) {
-        this.fpsStart = now;
-      }
-      this.fpsFrames++;
-      if (now - this.fpsStart >= 1000) {
-        this.frameFps = Math.round(this.fpsFrames * 1000 / (now - this.fpsStart));
-        this.fpsFrames = 0;
-        this.fpsStart = now;
-      }
-      this.status = `已连接 · ${frame.width}×${frame.height} · ${this.scalePercent()} · ${this.frameFps}fps`;
+      this.noteFrameRendered(frame.width, frame.height);
 
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
@@ -1186,6 +1228,7 @@ struct Index {
     }
     console.info(`LanRDP session lost: ${error}`);
     this.exitFullscreen();
+    this.disableNativeFrames();
     this.stopFrameTimer();
     this.releaseModifiers('sessionLost');
     this.sessionEpoch++;
@@ -1741,6 +1784,7 @@ struct Index {
 
   private disconnect(): void {
     this.exitFullscreen();
+    this.disableNativeFrames();
     this.stopFrameTimer();
     this.releaseModifiers("disconnect");
     this.shiftLatch = false;

@@ -27,6 +27,7 @@ include_directories(
 add_library(lanrdp SHARED napi_init.cpp)
 target_link_libraries(lanrdp PUBLIC
     libace_napi.z.so
+    libpixelmap_ndk.z.so
     -Wl,--start-group
     ${FREERDP_PREFIX}/lib/libfreerdp3.a
     ${FREERDP_PREFIX}/lib/libwinpr3.a
