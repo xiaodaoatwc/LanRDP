@@ -78,8 +78,8 @@ struct Index {
   @State private connected: boolean = false;
   @State private frameImage: image.PixelMap | null = null;
   private frameBack: image.PixelMap | null = null;
-  private nativeFront: image.PixelMap | null = null;
-  private nativeBack: image.PixelMap | null = null;
+  private frameAux: image.PixelMap | null = null;
+  private nativeMaps: image.PixelMap[] = [];
   private nativeFrameMode: boolean = false;
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
@@ -222,8 +222,11 @@ struct Index {
     if (this.nativeFrameMode) {
       unbindFrameMaps();
       this.nativeFrameMode = false;
-      this.nativeFront = null;
-      this.nativeBack = null;
+      this.nativeMaps = [];
+      if (this.frameAux !== null && this.frameAux !== this.frameImage && this.frameAux !== this.frameBack) {
+        this.frameAux.release();
+      }
+      this.frameAux = null;
     }
   }
 
@@ -1032,6 +1035,8 @@ struct Index {
     this.frameImage = null;
     this.frameBack?.release();
     this.frameBack = null;
+    this.frameAux?.release();
+    this.frameAux = null;
     this.frameVersion = 0;
     this.isConnecting = true;
     this.status = '连接中…';
@@ -1111,11 +1116,12 @@ struct Index {
     }
     if (this.nativeFrameMode) {
       if (!info.nativeBound) {
-        this.nativeFrameMode = false;
+        this.disableNativeFrames();
         return;
       }
       if (info.version !== this.frameVersion) {
-        const target = info.frameIndex === 0 ? this.nativeFront : this.nativeBack;
+        const target = info.frameIndex >= 0 && info.frameIndex < this.nativeMaps.length
+          ? this.nativeMaps[info.frameIndex] : null;
         if (target !== null) {
           this.frameImage = target;
           this.frameVersion = info.version;
@@ -1154,31 +1160,38 @@ struct Index {
         };
         const pixelStart = Date.now();
         const front = await image.createPixelMap(frame.data, options);
+        const middle = await image.createPixelMap(frame.data, options);
         const back = await image.createPixelMap(frame.data, options);
         pixelMs = Date.now() - pixelStart;
         if (epoch !== this.sessionEpoch) {
           front.release();
+          middle.release();
           back.release();
           return;
         }
         const after = getSessionInfo();
         if (after.state !== 2) {
           front.release();
+          middle.release();
           back.release();
           this.onSessionLost(after.error);
           return;
         }
         this.frameImage?.release();
         this.frameBack?.release();
+        this.frameAux?.release();
         this.frameImage = front;
-        this.frameBack = back;
+        this.frameBack = middle;
+        this.frameAux = back;
         if (!this.nativeFrameMode) {
-          const bound = bindFrameMaps(front, back);
+          const bound = bindFrameMaps(front, middle, back);
           console.info(`LanRDP native frames bound=${bound}`);
           if (bound) {
-            this.nativeFront = front;
-            this.nativeBack = back;
+            this.nativeMaps = [front, middle, back];
             this.nativeFrameMode = true;
+          } else {
+            back.release();
+            this.frameAux = null;
           }
         }
       } else {
@@ -1237,6 +1250,8 @@ struct Index {
     this.frameImage = null;
     this.frameBack?.release();
     this.frameBack = null;
+    this.frameAux?.release();
+    this.frameAux = null;
     this.frameVersion = 0;
     this.connected = false;
     this.fpsFrames = 0;
@@ -1795,6 +1810,8 @@ struct Index {
     this.frameImage = null;
     this.frameBack?.release();
     this.frameBack = null;
+    this.frameAux?.release();
+    this.frameAux = null;
     this.frameVersion = 0;
     this.viewScale = 1;
     this.viewOffsetX = 0;
