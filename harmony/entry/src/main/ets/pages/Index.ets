@@ -86,6 +86,7 @@ struct Index {
   private nativeFrameMode: boolean = false;
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
+  @State private targetFrameRate: number = 60;
   @State private isFullscreen: boolean = false;
   @State private showRemoteMenu: boolean = false;
   @State private frameWidth: number = 0;
@@ -234,7 +235,7 @@ struct Index {
       } catch (error) {
         console.info(`LanRDP read refresh rate failed: ${String(error)}`);
       }
-      const expected = Math.max(30, Math.min(60, refreshRate > 0 ? refreshRate : 60));
+      const expected = Math.max(30, Math.min(this.targetFrameRate, refreshRate > 0 ? refreshRate : 60));
       const maxRate = Math.max(expected, refreshRate > 0 ? refreshRate : 60);
       const sync = displaySync.create();
       sync.setExpectedFrameRateRange({ min: 30, max: maxRate, expected: expected });
@@ -2973,6 +2974,13 @@ struct Index {
               this.viewOffsetX = 0;
               this.viewOffsetY = 0;
             })
+          Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
+            .fontSize(12)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.targetFrameRate = this.targetFrameRate === 60 ? 30 : 60;
+              this.startFrameLoop();
+            })
           Button(this.moveMode ? '移动中' : '移动')
             .fontSize(12)
             .layoutWeight(1)
@@ -3067,6 +3075,12 @@ struct Index {
                 this.viewScale = 1;
                 this.viewOffsetX = 0;
                 this.viewOffsetY = 0;
+              })
+            Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
+              .fontSize(12)
+              .onClick(() => {
+                this.targetFrameRate = this.targetFrameRate === 60 ? 30 : 60;
+                this.startFrameLoop();
               })
             Button('全屏')
               .fontSize(12)
