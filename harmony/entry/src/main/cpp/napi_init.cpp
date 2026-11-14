@@ -55,6 +55,14 @@ static napi_value FreeRDPVersion(napi_env env, napi_callback_info info)
 }
 
 
+enum SessionState {
+    SESSION_IDLE = 0,
+    SESSION_CONNECTING = 1,
+    SESSION_CONNECTED = 2,
+    SESSION_DISCONNECTED = 3,
+    SESSION_FAILED = 4
+};
+
 struct Session {
     freerdp* instance = nullptr;
     rdpContext* context = nullptr;
@@ -64,6 +72,8 @@ struct Session {
     int width = 0;
     int height = 0;
     uint64_t version = 0;
+    std::atomic<int> state{ SESSION_IDLE };
+    std::string lastError;
     std::atomic<bool> stop{ false };
 };
 
@@ -74,6 +84,16 @@ struct SessionContext {
 
 static std::mutex g_sessionMutex;
 static Session* g_session = nullptr;
+static std::atomic<uint64_t> g_connectGeneration{ 0 };
+
+static void SetSessionState(Session* session, int state, const std::string& error = {})
+{
+    if (!session)
+        return;
+    std::lock_guard<std::mutex> lock(session->mutex);
+    session->state.store(state);
+    session->lastError = error;
+}
 
 static BOOL SessionBeginPaint(rdpContext* context)
 {
@@ -140,6 +160,17 @@ static void SessionLoop(Session* session)
         if (!freerdp_check_event_handles(session->context))
             break;
     }
+
+    if (!session->stop.load()) {
+        std::string message = "连接已断开";
+        if (session->context) {
+            const UINT32 code = freerdp_get_last_error(session->context);
+            const char* text = freerdp_get_last_error_string(code);
+            if (text && *text)
+                message = text;
+        }
+        SetSessionState(session, SESSION_DISCONNECTED, message);
+    }
 }
 
 static void DestroySession(Session* session)
@@ -151,6 +182,7 @@ static void DestroySession(Session* session)
         freerdp_abort_connect_context(session->context);
     if (session->thread.joinable())
         session->thread.join();
+    SetSessionState(session, SESSION_IDLE);
     if (session->instance) {
         freerdp_disconnect(session->instance);
         if (session->instance->context && session->instance->context->gdi)
@@ -224,10 +256,15 @@ static bool ProbeTcp(const std::string& host, uint32_t port, std::string& error)
 
 static bool StartSession(Session* session, const std::string& host, uint32_t port,
                          const std::string& username, const std::string& password,
-                         const std::string& domain, std::string& error)
+                         const std::string& domain, uint32_t desktopWidth,
+                         uint32_t desktopHeight, uint32_t desktopScale,
+                         uint32_t deviceScale, std::string& error)
 {
-    if (!ProbeTcp(host, port, error))
+    SetSessionState(session, SESSION_CONNECTING);
+    if (!ProbeTcp(host, port, error)) {
+        SetSessionState(session, SESSION_FAILED, error);
         return false;
+    }
 
 #if defined(__aarch64__)
     setenv("OPENSSL_MODULES", "/data/storage/el1/bundle/libs/arm64", 1);
@@ -238,6 +275,7 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
     freerdp* instance = freerdp_new();
     if (!instance) {
         error = "freerdp_new failed";
+        SetSessionState(session, SESSION_FAILED, error);
         return false;
     }
 
@@ -245,6 +283,7 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
     if (!freerdp_context_new(instance)) {
         error = "freerdp_context_new failed";
         freerdp_free(instance);
+        SetSessionState(session, SESSION_FAILED, error);
         return false;
     }
 
@@ -263,8 +302,14 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
     freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
     freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000);
-    freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, 1024);
-    freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, 768);
+    const uint32_t width = (desktopWidth >= 640 && desktopWidth <= 4096) ? desktopWidth : 1024;
+    const uint32_t height = (desktopHeight >= 480 && desktopHeight <= 4096) ? desktopHeight : 768;
+    freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, width);
+    freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, height);
+    if (desktopScale >= 100 && desktopScale <= 500)
+        freerdp_settings_set_uint32(settings, FreeRDP_DesktopScaleFactor, desktopScale);
+    if (deviceScale == 100 || deviceScale == 140 || deviceScale == 180)
+        freerdp_settings_set_uint32(settings, FreeRDP_DeviceScaleFactor, deviceScale);
 
     instance->PostConnect = SessionPostConnect;
 
@@ -273,9 +318,11 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
         const char* name = freerdp_get_last_error_name(code);
         const char* text = freerdp_get_last_error_string(code);
         error = "RDP " + std::to_string(code) + " " + (name ? name : "") + " " + (text ? text : "");
+        SetSessionState(session, SESSION_FAILED, error);
         return false;
     }
 
+    SetSessionState(session, SESSION_CONNECTED);
     session->thread = std::thread(SessionLoop, session);
     return true;
 }
@@ -288,6 +335,11 @@ struct ConnectWork {
     std::string password;
     std::string domain;
     uint32_t port = 3389;
+    uint32_t width = 1024;
+    uint32_t height = 768;
+    uint32_t desktopScale = 100;
+    uint32_t deviceScale = 100;
+    uint64_t generation = 0;
     bool connected = false;
     std::string error;
 };
@@ -308,8 +360,15 @@ static void ExecuteConnect(napi_env env, void* data)
 {
     auto* work = static_cast<ConnectWork*>(data);
     auto* session = new Session();
-    if (StartSession(session, work->host, work->port, work->username, work->password, work->domain, work->error)) {
+    if (StartSession(session, work->host, work->port, work->username, work->password, work->domain,
+                     work->width, work->height, work->desktopScale, work->deviceScale, work->error)) {
         std::lock_guard<std::mutex> lock(g_sessionMutex);
+        if (work->generation != g_connectGeneration.load()) {
+            work->error = "cancelled";
+            work->connected = false;
+            DestroySession(session);
+            return;
+        }
         if (g_session)
             DestroySession(g_session);
         g_session = session;
@@ -337,8 +396,8 @@ static void CompleteConnect(napi_env env, napi_status status, void* data)
 
 static napi_value Connect(napi_env env, napi_callback_info info)
 {
-    size_t argc = 5;
-    napi_value args[5] = {nullptr};
+    size_t argc = 9;
+    napi_value args[9] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
 
     napi_value promise;
@@ -353,9 +412,26 @@ static napi_value Connect(napi_env env, napi_callback_info info)
         work->username = GetString(env, args[2]);
         work->password = GetString(env, args[3]);
         work->domain = GetString(env, args[4]);
+        int32_t width = 1024;
+        int32_t height = 768;
+        if (argc >= 7) {
+            napi_get_value_int32(env, args[5], &width);
+            napi_get_value_int32(env, args[6], &height);
+        }
+        work->width = width > 0 ? static_cast<uint32_t>(width) : 1024;
+        work->height = height > 0 ? static_cast<uint32_t>(height) : 768;
+        int32_t desktopScale = 100;
+        int32_t deviceScale = 100;
+        if (argc >= 9) {
+            napi_get_value_int32(env, args[7], &desktopScale);
+            napi_get_value_int32(env, args[8], &deviceScale);
+        }
+        work->desktopScale = desktopScale > 0 ? static_cast<uint32_t>(desktopScale) : 100;
+        work->deviceScale = deviceScale > 0 ? static_cast<uint32_t>(deviceScale) : 100;
     }
 
     napi_value resourceName;
+    work->generation = ++g_connectGeneration;
     napi_create_string_utf8(env, "LanRDPConnect", NAPI_AUTO_LENGTH, &resourceName);
     napi_create_async_work(env, nullptr, resourceName, ExecuteConnect, CompleteConnect, work, &work->work);
     napi_queue_async_work(env, work->work);
@@ -364,6 +440,7 @@ static napi_value Connect(napi_env env, napi_callback_info info)
 
 static napi_value StopSession(napi_env env, napi_callback_info info)
 {
+    ++g_connectGeneration;
     std::lock_guard<std::mutex> lock(g_sessionMutex);
     if (g_session) {
         DestroySession(g_session);
@@ -372,6 +449,43 @@ static napi_value StopSession(napi_env env, napi_callback_info info)
     napi_value result;
     napi_get_boolean(env, true, &result);
     return result;
+}
+
+static napi_value GetSessionInfo(napi_env env, napi_callback_info info)
+{
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    int state = SESSION_IDLE;
+    std::string error;
+    uint64_t version = 0;
+    int width = 0;
+    int height = 0;
+    if (g_session) {
+        std::lock_guard<std::mutex> frameLock(g_session->mutex);
+        state = g_session->state.load();
+        error = g_session->lastError;
+        version = g_session->version;
+        width = g_session->width;
+        height = g_session->height;
+    }
+
+    napi_value object;
+    napi_value jsState;
+    napi_value jsError;
+    napi_value jsVersion;
+    napi_value jsWidth;
+    napi_value jsHeight;
+    napi_create_object(env, &object);
+    napi_create_int32(env, state, &jsState);
+    napi_create_string_utf8(env, error.c_str(), NAPI_AUTO_LENGTH, &jsError);
+    napi_create_double(env, static_cast<double>(version), &jsVersion);
+    napi_create_int32(env, width, &jsWidth);
+    napi_create_int32(env, height, &jsHeight);
+    napi_set_named_property(env, object, "state", jsState);
+    napi_set_named_property(env, object, "error", jsError);
+    napi_set_named_property(env, object, "version", jsVersion);
+    napi_set_named_property(env, object, "width", jsWidth);
+    napi_set_named_property(env, object, "height", jsHeight);
+    return object;
 }
 
 static napi_value GetFrame(napi_env env, napi_callback_info info)
@@ -587,6 +701,7 @@ static napi_value Init(napi_env env, napi_value exports)
         { "freerdpVersion", nullptr, FreeRDPVersion, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "connect", nullptr, Connect, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "stopSession", nullptr, StopSession, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "getSessionInfo", nullptr, GetSessionInfo, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },

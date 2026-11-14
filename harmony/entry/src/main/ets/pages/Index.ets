@@ -1,10 +1,39 @@
 import { image } from '@kit.ImageKit';
-import { KeyboardAvoidMode, window } from '@kit.ArkUI';
-import { connect, freerdpVersion, getFrame, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
+import { display, KeyboardAvoidMode, window } from '@kit.ArkUI';
+import { preferences } from '@kit.ArkData';
+import { asset } from '@kit.AssetStoreKit';
+import { util } from '@kit.ArkTS';
+import { connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
   extended: boolean;
+}
+
+interface ModifierInfo {
+  scan: number;
+  extended: boolean;
+}
+
+interface DesktopSize {
+  width: number;
+  height: number;
+}
+
+interface ScaleValues {
+  desktop: number;
+  device: number;
+}
+
+interface SavedConnection {
+  id: string;
+  host: string;
+  port: string;
+  username: string;
+  domain: string;
+  resolutionPreset: number;
+  scalePreset?: number;
+  savePassword: boolean;
 }
 
 @Entry
@@ -15,6 +44,14 @@ struct Index {
   @State private username: string = '';
   @State private password: string = '';
   @State private domain: string = '';
+  @State private resolutionPreset: number = 0;
+  @State private scalePreset: number = 0;
+  @State private savePassword: boolean = false;
+  @State private savedConnections: SavedConnection[] = [];
+  @State private selectedConnectionIndex: number = 0;
+  @State private selectedConnectionId: string = '';
+  private loadingSettings: boolean = false;
+  private applyingProfile: boolean = false;
   @State private status: string = `FreeRDP ${freerdpVersion()}`;
   @State private isConnecting: boolean = false;
   @State private connected: boolean = false;
@@ -28,6 +65,8 @@ struct Index {
   @State private keyboardText: string = '';
   @State private keyboardVisible: boolean = false;
   @State private shiftActive: boolean = false;
+  @State private shiftLatch: boolean = false;
+  @State private shiftCompat: boolean = true;
   @State private ctrlActive: boolean = false;
   @State private altActive: boolean = false;
   @State private comboActive: boolean = false;
@@ -39,6 +78,7 @@ struct Index {
   @State private systemKeyboardHeight: number = 0;
   @State private virtualKeyboardHeight: number = 0;
   private comboKeys: ComboKey[] = [];
+  private heldModifiers: number[] = [];
   private appWindow: window.Window | null = null;
   private panLastY: number = 0;
   private panMoved: boolean = false;
@@ -48,11 +88,15 @@ struct Index {
   private touchStartTime: number = 0;
   private lastClickY: number = 0;
   private shiftHeld: boolean = false;
-  private shiftPending: boolean = false;
   private shiftUsed: boolean = false;
-  private shiftTapTimer: number = -1;
+  private shiftScan: number = 0x2A;
+  private shiftDownAt: number = 0;
+  private shiftGrace: boolean = false;
+  private shiftGraceTimer: number = -1;
   private mouseDown: boolean = false;
   private timer: number = -1;
+  private frameBusy: boolean = false;
+  private sessionEpoch: number = 0;
   private longPressTimer: number = -1;
   private longPressTriggered: boolean = false;
   private touchMoved: boolean = false;
@@ -70,10 +114,16 @@ struct Index {
         this.systemKeyboardHeight = height;
       });
     });
+    this.loadSavedSettings();
   }
 
   onPageShow(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+    if (this.connected) {
+      setTimeout(() => {
+        this.focusRemoteKeyboard();
+      }, 50);
+    }
   }
 
   aboutToDisappear(): void {
@@ -82,6 +132,7 @@ struct Index {
       this.appWindow = null;
     }
     this.stopFrameTimer();
+    this.releaseModifiers("disappear");
     stopSession();
   }
 
@@ -99,6 +150,371 @@ struct Index {
     }
   }
 
+  private focusRemoteKeyboard(): void {
+    try {
+      this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
+    } catch (error) {
+      console.error(`LanRDP focus failed: ${String(error)}`);
+    }
+  }
+
+  private resolutionLabel(): string {
+    const labels: string[] = [
+      '自动（推荐）', '1024×768', '1280×800', '1440×900', '1600×900', '1920×1080'
+    ];
+    if (this.resolutionPreset >= 0 && this.resolutionPreset < labels.length) {
+      return labels[this.resolutionPreset];
+    }
+    return labels[0];
+  }
+
+  private resolutionSize(): DesktopSize {
+    const presets: DesktopSize[] = [
+      { width: 0, height: 0 },
+      { width: 1024, height: 768 },
+      { width: 1280, height: 800 },
+      { width: 1440, height: 900 },
+      { width: 1600, height: 900 },
+      { width: 1920, height: 1080 }
+    ];
+    if (this.resolutionPreset > 0 && this.resolutionPreset < presets.length) {
+      return presets[this.resolutionPreset];
+    }
+
+    let width = 1280;
+    let height = 800;
+    try {
+      const info = display.getDefaultDisplaySync();
+      const viewWidth = Math.floor(px2vp(info.width));
+      const viewHeight = Math.floor(px2vp(info.height));
+      width = Math.floor((viewWidth - 16) / 8) * 8;
+      height = Math.floor((viewHeight - 140) / 8) * 8;
+    } catch (error) {
+      console.info(`LanRDP display size failed: ${String(error)}`);
+    }
+    if (width < 800) width = 800;
+    if (width > 1920) width = 1920;
+    if (height < 600) height = 600;
+    if (height > 1200) height = 1200;
+    return { width: width, height: height };
+  }
+
+  private scaleLabel(): string {
+    const labels: string[] = ['100%（推荐）', '125%', '150%', '175%', '200%'];
+    if (this.scalePreset >= 0 && this.scalePreset < labels.length) {
+      return labels[this.scalePreset];
+    }
+    return labels[0];
+  }
+
+  private scaleValues(): ScaleValues {
+    const scales: ScaleValues[] = [
+      { desktop: 100, device: 100 },
+      { desktop: 125, device: 140 },
+      { desktop: 150, device: 140 },
+      { desktop: 175, device: 180 },
+      { desktop: 200, device: 180 }
+    ];
+    if (this.scalePreset >= 0 && this.scalePreset < scales.length) {
+      return scales[this.scalePreset];
+    }
+    return scales[0];
+  }
+
+  private passwordAlias(id: string = 'default'): Uint8Array {
+    const name = id === 'default'
+      ? 'com.xiaodaoatwc.lanrdp.password'
+      : `com.xiaodaoatwc.lanrdp.password.`;
+    return new util.TextEncoder().encodeInto(name);
+  }
+
+  private async getPref(): Promise<preferences.Preferences | null> {
+    const context = this.getUIContext().getHostContext();
+    if (!context) {
+      return null;
+    }
+    return await preferences.getPreferences(context, 'lanrdp');
+  }
+
+  private async loadSavedSettings(): Promise<void> {
+    this.loadingSettings = true;
+    try {
+      const pref = await this.getPref();
+      if (!pref) {
+        return;
+      }
+      const host = String(await pref.get('host', ''));
+      const port = String(await pref.get('port', '3389'));
+      const username = String(await pref.get('username', ''));
+      const domain = String(await pref.get('domain', ''));
+      const resolution = Number(await pref.get('resolution', 0));
+      const scale = Number(await pref.get('scale', 0));
+      const remember = Boolean(await pref.get('savePassword', false));
+      const rawProfiles = String(await pref.get('connections', ''));
+      if (rawProfiles.length > 0) {
+        try {
+          const parsed = JSON.parse(rawProfiles) as SavedConnection[];
+          if (Array.isArray(parsed)) {
+            this.savedConnections = parsed;
+            this.selectedConnectionIndex = 0;
+          }
+        } catch (error) {
+          console.info(`LanRDP parse profiles failed: ${String(error)}`);
+        }
+      }
+      if (this.host.length === 0) {
+        this.host = host;
+        this.portText = port.length > 0 ? port : '3389';
+        this.username = username;
+        this.domain = domain;
+      }
+      if (resolution >= 0 && resolution <= 5) {
+        this.resolutionPreset = resolution;
+      }
+      if (scale >= 0 && scale < 5) {
+        this.scalePreset = scale;
+      }
+      this.savePassword = remember;
+      if (remember) {
+        const password = await this.loadSavedPassword();
+        if (password.length > 0) {
+          this.password = password;
+        } else {
+          this.savePassword = false;
+        }
+      }
+      console.info('LanRDP settings loaded');
+    } catch (error) {
+      console.info(`LanRDP load settings failed: ${String(error)}`);
+    } finally {
+      this.loadingSettings = false;
+    }
+  }
+
+  private async saveConnectionSettings(): Promise<void> {
+    if (this.loadingSettings) {
+      return;
+    }
+    try {
+      const pref = await this.getPref();
+      if (!pref) {
+        return;
+      }
+      await pref.put('host', this.host.trim());
+      await pref.put('port', this.portText.trim());
+      await pref.put('username', this.username.trim());
+      await pref.put('domain', this.domain.trim());
+      await pref.put('resolution', this.resolutionPreset);
+      await pref.put('scale', this.scalePreset);
+      await pref.put('savePassword', this.savePassword);
+      await pref.flush();
+      if (this.savePassword) {
+        await this.savePasswordToAsset(this.password);
+      } else {
+        await this.removeSavedPassword();
+      }
+      console.info('LanRDP settings saved');
+    } catch (error) {
+      console.info(`LanRDP save settings failed: ${String(error)}`);
+    }
+  }
+
+  private async savePasswordToAsset(password: string, id: string = 'default'): Promise<void> {
+    if (password.length === 0) {
+      await this.removeSavedPassword(id);
+      return;
+    }
+    const alias = this.passwordAlias(id);
+    const secret = new util.TextEncoder().encodeInto(password);
+    const query = new Map<asset.Tag, asset.Value>();
+    query.set(asset.Tag.ALIAS, alias);
+    try {
+      await asset.remove(query);
+    } catch (error) {
+      console.info(`LanRDP asset remove before add: ${String(error)}`);
+    }
+
+    const attributes = new Map<asset.Tag, asset.Value>();
+    attributes.set(asset.Tag.ALIAS, alias);
+    attributes.set(asset.Tag.SECRET, secret);
+    attributes.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_FIRST_UNLOCKED);
+    attributes.set(asset.Tag.IS_PERSISTENT, true);
+    try {
+      await asset.add(attributes);
+      console.info('LanRDP password saved to Asset Store');
+    } catch (error) {
+      console.info(`LanRDP asset add failed: ${String(error)}`);
+      attributes.delete(asset.Tag.IS_PERSISTENT);
+      try {
+        await asset.add(attributes);
+        console.info('LanRDP password saved to Asset Store (non-persistent)');
+      } catch (retryError) {
+        console.info(`LanRDP asset add retry failed: ${String(retryError)}`);
+      }
+    }
+  }
+
+  private async loadSavedPassword(id: string = 'default'): Promise<string> {
+    try {
+      const query = new Map<asset.Tag, asset.Value>();
+      query.set(asset.Tag.ALIAS, this.passwordAlias(id));
+      query.set(asset.Tag.RETURN_TYPE, asset.ReturnType.ALL);
+      const results = await asset.query(query);
+      if (results.length === 0) {
+        return '';
+      }
+      const value = results[0].get(asset.Tag.SECRET);
+      if (value instanceof Uint8Array) {
+        return new util.TextDecoder().decodeToString(value);
+      }
+    } catch (error) {
+      console.info(`LanRDP load password failed: ${String(error)}`);
+    }
+    return '';
+  }
+
+  private async removeSavedPassword(id: string = 'default'): Promise<void> {
+    try {
+      const query = new Map<asset.Tag, asset.Value>();
+      query.set(asset.Tag.ALIAS, this.passwordAlias(id));
+      await asset.remove(query);
+      console.info('LanRDP saved password removed');
+    } catch (error) {
+      console.info(`LanRDP remove password: ${String(error)}`);
+    }
+  }
+
+  private connectionLabel(profile: SavedConnection): string {
+    const name = profile.username.length > 0 ? `${profile.username}@${profile.host}` : profile.host;
+    return profile.port.length > 0 && profile.port !== '3389' ? `${name}:${profile.port}` : name;
+  }
+
+  private connectionOptions(): SelectOption[] {
+    const options: SelectOption[] = [{ value: '手动输入' }];
+    for (let i = 0; i < this.savedConnections.length; i++) {
+      options.push({ value: this.connectionLabel(this.savedConnections[i]) });
+    }
+    return options;
+  }
+
+  private selectedConnectionLabel(): string {
+    if (this.selectedConnectionIndex <= 0 || this.selectedConnectionIndex > this.savedConnections.length) {
+      return '手动输入';
+    }
+    return this.connectionLabel(this.savedConnections[this.selectedConnectionIndex - 1]);
+  }
+
+  private async applyProfile(profile: SavedConnection): Promise<void> {
+    this.applyingProfile = true;
+    try {
+      this.selectedConnectionId = profile.id;
+      this.host = profile.host;
+      this.portText = profile.port.length > 0 ? profile.port : '3389';
+      this.username = profile.username;
+      this.domain = profile.domain;
+      this.resolutionPreset = profile.resolutionPreset;
+      this.scalePreset = profile.scalePreset !== undefined ? profile.scalePreset : 0;
+      this.savePassword = profile.savePassword;
+      this.password = '';
+      if (profile.savePassword) {
+        const saved = await this.loadSavedPassword(profile.id);
+        if (saved.length > 0) {
+          this.password = saved;
+        }
+      }
+      this.status = '已载入连接记录';
+    } finally {
+      this.applyingProfile = false;
+    }
+  }
+
+  private async persistProfiles(): Promise<void> {
+    try {
+      const pref = await this.getPref();
+      if (!pref) {
+        return;
+      }
+      await pref.put('connections', JSON.stringify(this.savedConnections));
+      await pref.flush();
+    } catch (error) {
+      console.info(`LanRDP save profiles failed: ${String(error)}`);
+    }
+  }
+
+  private async saveCurrentProfile(showStatus: boolean = false): Promise<void> {
+    const host = this.host.trim();
+    if (host.length === 0) {
+      if (showStatus) {
+        this.status = '请输入主机名或 IP';
+      }
+      return;
+    }
+
+    let id = this.selectedConnectionId;
+    let index = id.length > 0
+      ? this.savedConnections.findIndex((item: SavedConnection) => item.id === id)
+      : -1;
+    if (index < 0) {
+      const match = this.savedConnections.findIndex((item: SavedConnection) =>
+        item.host === host &&
+        item.port === this.portText.trim() &&
+        item.username === this.username.trim() &&
+        item.domain === this.domain.trim());
+      if (match >= 0) {
+        index = match;
+        id = this.savedConnections[match].id;
+      }
+    }
+    if (id.length === 0) {
+      id = util.generateRandomUUID();
+    }
+
+    const profile: SavedConnection = {
+      id: id,
+      host: host,
+      port: this.portText.trim(),
+      username: this.username.trim(),
+      domain: this.domain.trim(),
+      resolutionPreset: this.resolutionPreset,
+      scalePreset: this.scalePreset,
+      savePassword: this.savePassword
+    };
+    const next = this.savedConnections.slice();
+    if (index >= 0) {
+      next[index] = profile;
+    } else {
+      next.push(profile);
+      index = next.length - 1;
+    }
+    this.savedConnections = next;
+    this.selectedConnectionId = id;
+    this.selectedConnectionIndex = index + 1;
+    await this.persistProfiles();
+    if (this.savePassword) {
+      await this.savePasswordToAsset(this.password, id);
+    } else {
+      await this.removeSavedPassword(id);
+    }
+    if (showStatus) {
+      this.status = '已保存连接记录';
+    }
+    console.info(`LanRDP profile saved id=${id} count=${next.length}`);
+  }
+
+  private async deleteSelectedProfile(): Promise<void> {
+    const id = this.selectedConnectionId;
+    if (id.length === 0) {
+      this.status = '请先选择连接记录';
+      return;
+    }
+    this.savedConnections = this.savedConnections.filter((item: SavedConnection) => item.id !== id);
+    this.selectedConnectionId = '';
+    this.selectedConnectionIndex = 0;
+    await this.removeSavedPassword(id);
+    await this.persistProfiles();
+    this.status = '已删除连接记录';
+  }
+
   private async doConnect(): Promise<void> {
     const host = this.host.trim();
     const port = Number(this.portText);
@@ -113,11 +529,19 @@ struct Index {
     }
 
     this.stopFrameTimer();
+    this.releaseModifiers("connect");
+    this.shiftLatch = false;
+    this.inputFocused = false;
     stopSession();
+    this.sessionEpoch++;
+    this.frameBusy = false;
+    this.frameImage?.release();
     this.frameImage = null;
     this.frameVersion = 0;
     this.isConnecting = true;
     this.status = '连接中…';
+    const desktop = this.resolutionSize();
+    const scale = this.scaleValues();
 
     try {
       const result = await connect(
@@ -125,14 +549,23 @@ struct Index {
         port,
         this.username.trim(),
         this.password,
-        this.domain.trim()
+        this.domain.trim(),
+        desktop.width,
+        desktop.height,
+        scale.desktop,
+        scale.device
       );
       if (result === 'connected') {
         this.connected = true;
         this.status = '连接成功，等待画面…';
+        setTimeout(() => {
+          this.focusRemoteKeyboard();
+        }, 50);
         this.timer = setInterval(() => {
           this.refreshFrame();
         }, 200);
+        this.saveConnectionSettings();
+        this.saveCurrentProfile();
       } else {
         this.status = result;
       }
@@ -144,18 +577,35 @@ struct Index {
   }
 
   private async refreshFrame(): Promise<void> {
-    if (this.isConnecting) {
+    if (this.isConnecting || this.frameBusy) {
       return;
     }
-    const frame = getFrame();
-    if (!frame) {
+    const info = getSessionInfo();
+    if (info.state === 3 || info.state === 4) {
+      this.onSessionLost(info.error);
       return;
     }
-    if (frame.version === this.frameVersion && this.frameImage !== null) {
+    if (info.state === 0 && this.connected) {
+      this.onSessionLost('会话已结束');
+      return;
+    }
+    if (info.state !== 2) {
+      return;
+    }
+    if (info.version === this.frameVersion && this.frameImage !== null) {
       return;
     }
 
+    this.frameBusy = true;
+    const epoch = this.sessionEpoch;
     try {
+      const frame = getFrame();
+      if (!frame) {
+        return;
+      }
+      if (frame.version === this.frameVersion && this.frameImage !== null) {
+        return;
+      }
       const options: image.InitializationOptions = {
         size: { width: frame.width, height: frame.height },
         pixelFormat: image.PixelMapFormat.RGBA_8888,
@@ -163,15 +613,50 @@ struct Index {
         alphaType: image.AlphaType.OPAQUE
       };
       const pixelMap = await image.createPixelMap(frame.data, options);
-      this.frameImage?.release();
+      if (epoch !== this.sessionEpoch) {
+        pixelMap.release();
+        return;
+      }
+      const after = getSessionInfo();
+      if (after.state !== 2) {
+        pixelMap.release();
+        this.onSessionLost(after.error);
+        return;
+      }
+      const old = this.frameImage;
       this.frameImage = pixelMap;
       this.frameVersion = frame.version;
       this.frameWidth = frame.width;
       this.frameHeight = frame.height;
       this.status = `已连接 · ${frame.width}×${frame.height}`;
+      old?.release();
     } catch (error) {
       this.status = `渲染失败：${String(error)}`;
+    } finally {
+      this.frameBusy = false;
     }
+  }
+
+  private onSessionLost(error: string): void {
+    if (!this.connected) {
+      return;
+    }
+    console.info(`LanRDP session lost: ${error}`);
+    this.stopFrameTimer();
+    this.releaseModifiers('sessionLost');
+    this.sessionEpoch++;
+    this.frameBusy = false;
+    this.frameImage?.release();
+    this.frameImage = null;
+    this.frameVersion = 0;
+    this.connected = false;
+    this.inputFocused = false;
+    this.mouseDown = false;
+    this.longPressTriggered = false;
+    this.viewScale = 1;
+    this.viewOffsetY = 0;
+    const detail = error.length > 120 ? error.substring(0, 120) : error;
+    this.status = detail.length > 0 ? `连接已断开：${detail}` : '连接已断开';
   }
 
   private handleTouch(event: TouchEvent): void {
@@ -227,8 +712,9 @@ struct Index {
     }
 
     if (event.type === TouchType.Down) {
-      if (!this.inputFocused && !this.keyboardVisible) {
-        this.getUIContext().getFocusController().requestFocus('remoteKeyboard');
+      if (!this.keyboardVisible) {
+        this.inputFocused = false;
+        this.focusRemoteKeyboard();
       }
       this.lastWheelY = -1;
       this.lastClickY = touchY;
@@ -298,64 +784,239 @@ struct Index {
     sendKey(code, false, extended);
   }
 
-  private clearShiftTap(): void {
-    if (this.shiftTapTimer >= 0) {
-      clearTimeout(this.shiftTapTimer);
-      this.shiftTapTimer = -1;
-    }
-    this.shiftPending = false;
+  private modifierInfo(code: number): ModifierInfo | null {
+    if (code === 2047) { return { scan: 0x2A, extended: false }; }
+    if (code === 2048) { return { scan: 0x36, extended: false }; }
+    if (code === 2045) { return { scan: 0x38, extended: false }; }
+    if (code === 2046) { return { scan: 0x38, extended: true }; }
+    if (code === 2072) { return { scan: 0x1D, extended: false }; }
+    if (code === 2073) { return { scan: 0x1D, extended: true }; }
+    if (code === 2076) { return { scan: 0x5B, extended: true }; }
+    if (code === 2077) { return { scan: 0x5C, extended: true }; }
+    return null;
   }
 
-  private scheduleShiftTap(): void {
-    this.clearShiftTap();
-    this.shiftPending = true;
-    this.shiftTapTimer = setTimeout(() => {
-      if (this.shiftPending) {
-        this.shiftPending = false;
-        this.shiftTapTimer = -1;
-        sendKey(0x2A, true, false);
-        setTimeout(() => {
-          sendKey(0x2A, false, false);
-        }, 40);
+  private modifierName(code: number): string {
+    if (code === 2047 || code === 2048) { return 'Shift'; }
+    if (code === 2045 || code === 2046) { return 'Alt'; }
+    if (code === 2072 || code === 2073) { return 'Ctrl'; }
+    return '';
+  }
+
+  private hasNonShiftModifier(): boolean {
+    return this.heldModifiers.indexOf(2045) >= 0 ||
+      this.heldModifiers.indexOf(2046) >= 0 ||
+      this.heldModifiers.indexOf(2072) >= 0 ||
+      this.heldModifiers.indexOf(2073) >= 0 ||
+      this.heldModifiers.indexOf(2076) >= 0 ||
+      this.heldModifiers.indexOf(2077) >= 0;
+  }
+
+  private cancelShiftGrace(): void {
+    if (this.shiftGraceTimer >= 0) {
+      clearTimeout(this.shiftGraceTimer);
+      this.shiftGraceTimer = -1;
+    }
+    this.shiftGrace = false;
+  }
+
+  private startShiftGrace(): void {
+    this.cancelShiftGrace();
+    this.shiftGrace = true;
+    console.info('LanRDP shift grace start');
+    this.shiftGraceTimer = setTimeout(() => {
+      this.shiftGraceTimer = -1;
+      if (this.shiftGrace) {
+        this.shiftGrace = false;
+        console.info('LanRDP shift grace timeout -> tap');
+        this.sendShiftTap();
       }
-    }, 120);
+    }, 350);
+  }
+
+  private sendShiftTap(): void {
+    sendKey(0x2A, true, false);
+    setTimeout(() => {
+      sendKey(0x2A, false, false);
+    }, 100);
+  }
+
+  private sendKeyWithShift(code: number, extended: boolean = false): void {
+    sendKey(this.shiftScan, true, false);
+    sendKey(code, true, extended);
+    sendKey(code, false, extended);
+    sendKey(this.shiftScan, false, false);
+    this.shiftUsed = true;
+  }
+
+  private tapSpecial(code: number, extended: boolean = false): void {
+    if (this.shiftCompat && (this.shiftHeld || this.shiftGrace)) {
+      console.info(`LanRDP shifted special code=${code} via=${this.shiftGrace ? 'grace' : 'held'}`);
+      this.cancelShiftGrace();
+      this.sendKeyWithShift(code, extended);
+      return;
+    }
+    this.tapKey(code, extended);
+  }
+
+  private tapText(code: number, extended: boolean, shiftChar: string): void {
+    if (this.shiftCompat && (this.shiftHeld || this.shiftGrace)) {
+      console.info(`LanRDP shifted text '${shiftChar}' via=${this.shiftGrace ? 'grace' : 'held'}`);
+      this.cancelShiftGrace();
+      if (!this.hasNonShiftModifier() && shiftChar.length === 1) {
+        sendUnicode(shiftChar.charCodeAt(0), true);
+        sendUnicode(shiftChar.charCodeAt(0), false);
+        this.shiftUsed = true;
+        return;
+      }
+      this.sendKeyWithShift(code, extended);
+      return;
+    }
+    this.tapKey(code, extended);
+  }
+
+  private handleModifier(code: number, down: boolean): void {
+    const info = this.modifierInfo(code);
+    if (info === null) {
+      return;
+    }
+    if (this.shiftCompat && (code === 2047 || code === 2048)) {
+      if (down) {
+        if (this.shiftHeld) {
+          return;
+        }
+        this.cancelShiftGrace();
+        this.shiftHeld = true;
+        this.shiftUsed = false;
+        this.shiftLatch = false;
+        this.shiftScan = code === 2048 ? 0x36 : 0x2A;
+        this.shiftDownAt = Date.now();
+        console.info(`LanRDP compat shift down scan=${this.shiftScan}`);
+      } else {
+        if (!this.shiftHeld) {
+          return;
+        }
+        this.shiftHeld = false;
+        const heldMs = Date.now() - this.shiftDownAt;
+        console.info(`LanRDP compat shift up heldMs=${heldMs} used=${this.shiftUsed}`);
+        if (!this.shiftUsed) {
+          if (heldMs < 80) {
+            this.startShiftGrace();
+          } else {
+            this.sendShiftTap();
+          }
+        }
+        this.shiftUsed = false;
+      }
+      return;
+    }
+    const index = this.heldModifiers.indexOf(code);
+    if (down) {
+      if (index >= 0) {
+        return;
+      }
+      this.heldModifiers.push(code);
+      sendKey(info.scan, true, info.extended);
+      console.info(`LanRDP native modifier down code=${code} scan=${info.scan}`);
+    } else {
+      if (index < 0) {
+        return;
+      }
+      this.heldModifiers.splice(index, 1);
+      sendKey(info.scan, false, info.extended);
+      console.info(`LanRDP native modifier up code=${code} scan=${info.scan}`);
+    }
+    if (code === 2047 || code === 2048) {
+      this.shiftHeld = this.heldModifiers.indexOf(2047) >= 0 ||
+        this.heldModifiers.indexOf(2048) >= 0;
+      if (down) {
+        this.shiftLatch = false;
+      }
+    }
+  }
+
+  private releaseModifiers(reason: string = ''): void {
+    console.info(`LanRDP release reason=${reason} held=${this.heldModifiers.join(',')} shiftHeld=${this.shiftHeld} compat=${this.shiftCompat}`);
+    this.cancelShiftGrace();
+    for (let i = 0; i < this.heldModifiers.length; i++) {
+      const info = this.modifierInfo(this.heldModifiers[i]);
+      if (info !== null) {
+        sendKey(info.scan, false, info.extended);
+      }
+    }
+    this.heldModifiers = [];
+    this.shiftHeld = false;
+    this.shiftUsed = false;
+    this.shiftLatch = false;
+  }
+
+  private toggleShiftMode(): void {
+    this.releaseModifiers('shiftMode');
+    this.shiftCompat = !this.shiftCompat;
+    this.shiftHeld = false;
+    this.shiftUsed = false;
+    this.shiftLatch = false;
+    this.status = this.shiftCompat
+      ? 'Shift 兼容：字母不触发输入法切换'
+      : 'Shift 原生：由 Windows 处理';
+    console.info(`LanRDP shift mode compat=${this.shiftCompat}`);
+  }
+
+  private toggleRemoteIME(): void {
+    this.cancelShiftGrace();
+    this.shiftLatch = false;
+    this.inputFocused = false;
+    this.focusRemoteKeyboard();
+    this.sendShiftTap();
+    this.status = '已发送 Shift：切换中/英';
   }
 
   private handleHardwareKey(event: KeyEvent): void {
     event.stopPropagation();
+    if (this.inputFocused) {
+      return;
+    }
     const code = event.keyCode;
-    if (code === 2047 || code === 2048) {
-      if (event.type === KeyType.Down) {
-        this.clearShiftTap();
-        this.shiftHeld = true;
-        this.shiftUsed = false;
-      } else if (event.type === KeyType.Up) {
-        this.shiftHeld = false;
-        if (!this.shiftUsed)
-          this.scheduleShiftTap();
-        this.shiftUsed = false;
+    if (this.modifierInfo(code) !== null) {
+      let physical = 'n/a';
+      try {
+        const name = this.modifierName(code);
+        if (event.getModifierKeyState !== undefined && name.length > 0) {
+          physical = String(event.getModifierKeyState([name]));
+        }
+      } catch (error) {
+        physical = `err:${String(error)}`;
       }
+      console.info(`LanRDP key code=${code} type=${event.type} compat=${this.shiftCompat} shiftHeld=${this.shiftHeld} held=${this.heldModifiers.join(',')} physical=${physical}`);
+      this.handleModifier(code, event.type === KeyType.Down);
       return;
     }
     if (event.type !== KeyType.Down) {
       return;
     }
-    const shifted = this.shiftHeld || this.shiftPending;
-    if (shifted) {
-      this.clearShiftTap();
-      this.shiftHeld = false;
-      this.shiftUsed = true;
+    if (code === 2074) { this.tapKey(0x3A); return; }
+    if (code === 2054) { this.tapSpecial(0x1C); return; }
+    if (code === 2055) { this.tapSpecial(0x0E); return; }
+    if (code === 2070) { this.tapSpecial(0x01); return; }
+    if (code === 2049) { this.tapSpecial(0x0F); return; }
+    if (code === 2071) { this.tapSpecial(0x53, true); return; }
+    if (code === 2012) { this.tapSpecial(0x48, true); return; }
+    if (code === 2013) { this.tapSpecial(0x50, true); return; }
+    if (code === 2014) { this.tapSpecial(0x4B, true); return; }
+    if (code === 2015) { this.tapSpecial(0x4D, true); return; }
+    if (code === 2050) { this.tapSpecial(0x39); return; }
+    if (code === 2081) { this.tapSpecial(0x47, true); return; }
+    if (code === 2082) { this.tapSpecial(0x4F, true); return; }
+    if (code === 2083) { this.tapSpecial(0x52, true); return; }
+    if (code === 2068) { this.tapSpecial(0x49, true); return; }
+    if (code === 2069) { this.tapSpecial(0x51, true); return; }
+    if (code >= 2090 && code <= 2101) {
+      const functionKeys: number[] = [
+        0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58
+      ];
+      this.tapSpecial(functionKeys[code - 2090]);
+      return;
     }
-    if (code === 2054) { this.tapKey(0x1C); return; }
-    if (code === 2055) { this.tapKey(0x0E); return; }
-    if (code === 2070) { this.tapKey(0x01); return; }
-    if (code === 2049) { this.tapKey(0x0F); return; }
-    if (code === 2071) { this.tapKey(0x53, true); return; }
-    if (code === 2012) { this.tapKey(0x48, true); return; }
-    if (code === 2013) { this.tapKey(0x50, true); return; }
-    if (code === 2014) { this.tapKey(0x4B, true); return; }
-    if (code === 2015) { this.tapKey(0x4D, true); return; }
-    if (code === 2050) { this.tapKey(0x39); return; }
 
     if (code >= 2017 && code <= 2042) {
       const letters: number[] = [
@@ -363,48 +1024,43 @@ struct Index {
         0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
         0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C
       ];
-      if (shifted) {
-        const upper = 65 + (code - 2017);
-        sendUnicode(upper, true);
-        sendUnicode(upper, false);
-      } else {
-        this.tapKey(letters[code - 2017]);
-      }
+      this.tapText(letters[code - 2017], false, String.fromCharCode(65 + (code - 2017)));
       return;
     }
     if (code >= 2000 && code <= 2009) {
       const digits: number[] = [0x0B, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
-      if (shifted) {
-        const shiftedDigits = ')!@#$%^&*(';
-        sendUnicode(shiftedDigits.charCodeAt(code - 2000), true);
-        sendUnicode(shiftedDigits.charCodeAt(code - 2000), false);
-      } else {
-        this.tapKey(digits[code - 2000]);
-      }
+      this.tapText(digits[code - 2000], false, ')!@#$%^&*('.charAt(code - 2000));
       return;
     }
-    if (code === 2043) { if (shifted) { sendUnicode(0x3C, true); sendUnicode(0x3C, false); } else this.tapKey(0x33); return; }
-    if (code === 2044) { if (shifted) { sendUnicode(0x3E, true); sendUnicode(0x3E, false); } else this.tapKey(0x34); return; }
-    if (code === 2064) { if (shifted) { sendUnicode(0x3F, true); sendUnicode(0x3F, false); } else this.tapKey(0x35); return; }
-    if (code === 2057) { if (shifted) { sendUnicode(0x5F, true); sendUnicode(0x5F, false); } else this.tapKey(0x0C); return; }
-    if (code === 2058) { if (shifted) { sendUnicode(0x2B, true); sendUnicode(0x2B, false); } else this.tapKey(0x0D); return; }
-    if (code === 2059) { if (shifted) { sendUnicode(0x7B, true); sendUnicode(0x7B, false); } else this.tapKey(0x1A); return; }
-    if (code === 2060) { if (shifted) { sendUnicode(0x7D, true); sendUnicode(0x7D, false); } else this.tapKey(0x1B); return; }
-    if (code === 2061) { if (shifted) { sendUnicode(0x7C, true); sendUnicode(0x7C, false); } else this.tapKey(0x2B); return; }
-    if (code === 2062) { if (shifted) { sendUnicode(0x3A, true); sendUnicode(0x3A, false); } else this.tapKey(0x27); return; }
-    if (code === 2063) { if (shifted) { sendUnicode(0x22, true); sendUnicode(0x22, false); } else this.tapKey(0x28); return; }
-    if (code === 2056) { if (shifted) { sendUnicode(0x7E, true); sendUnicode(0x7E, false); } else this.tapKey(0x29); return; }
+    if (code === 2043) { this.tapText(0x33, false, '<'); return; }
+    if (code === 2044) { this.tapText(0x34, false, '>'); return; }
+    if (code === 2064) { this.tapText(0x35, false, '?'); return; }
+    if (code === 2057) { this.tapText(0x0C, false, '_'); return; }
+    if (code === 2058) { this.tapText(0x0D, false, '+'); return; }
+    if (code === 2059) { this.tapText(0x1A, false, '{'); return; }
+    if (code === 2060) { this.tapText(0x1B, false, '}'); return; }
+    if (code === 2061) { this.tapText(0x2B, false, '|'); return; }
+    if (code === 2062) { this.tapText(0x27, false, ':'); return; }
+    if (code === 2063) { this.tapText(0x28, false, '\"'); return; }
+    if (code === 2056) { this.tapText(0x29, false, '~'); return; }
 
     const text = event.keyText;
     if (text.length === 1) {
       sendUnicode(text.charCodeAt(0), true);
       sendUnicode(text.charCodeAt(0), false);
+      if (this.shiftCompat && this.shiftHeld) {
+        this.shiftUsed = true;
+      }
     }
   }
 
   private disconnect(): void {
     this.stopFrameTimer();
+    this.releaseModifiers("disconnect");
+    this.shiftLatch = false;
     stopSession();
+    this.sessionEpoch++;
+    this.frameBusy = false;
     this.frameImage?.release();
     this.frameImage = null;
     this.frameVersion = 0;
@@ -413,16 +1069,20 @@ struct Index {
     this.connected = false;
     this.mouseDown = false;
     this.longPressTriggered = false;
+    this.inputFocused = false;
     this.status = '已断开';
   }
 
   private onInputFocus(): void {
+    console.info('LanRDP input focus');
+    this.releaseModifiers("inputFocus");
     this.inputFocused = true;
     this.keyboardVisible = false;
     this.adjustViewForInput();
   }
 
   private onInputBlur(): void {
+    console.info('LanRDP input blur');
     this.inputFocused = false;
     this.viewOffsetY = 0;
   }
@@ -431,12 +1091,17 @@ struct Index {
     if (this.keyboardVisible) {
       this.keyboardVisible = false;
       this.viewOffsetY = 0;
+      this.focusRemoteKeyboard();
       return;
     }
+    this.releaseModifiers("virtualKeyboard");
     this.getUIContext().getFocusController().clearFocus();
     this.inputFocused = false;
     this.keyboardVisible = true;
     this.adjustViewForInput();
+    setTimeout(() => {
+      this.focusRemoteKeyboard();
+    }, 50);
   }
 
   private sendMouseMoveAt(x: number, y: number, button?: number): void {
@@ -472,10 +1137,24 @@ struct Index {
     this.keyboardText = '';
   }
 
-  private pressKey(code: number, extended: boolean = false): void {
+  private pressKey(code: number, extended: boolean = false, shiftChar?: string): void {
+    this.cancelShiftGrace();
     if (this.comboActive) {
       sendKey(code, true, extended);
       this.comboKeys.push({ code: code, extended: extended });
+      return;
+    }
+    if (this.shiftLatch) {
+      if (this.shiftCompat && shiftChar !== undefined && shiftChar.length === 1) {
+        sendUnicode(shiftChar.charCodeAt(0), true);
+        sendUnicode(shiftChar.charCodeAt(0), false);
+      } else {
+        sendKey(0x2A, true, false);
+        sendKey(code, true, extended);
+        sendKey(code, false, extended);
+        sendKey(0x2A, false, false);
+      }
+      this.shiftLatch = false;
       return;
     }
     sendKey(code, true, extended);
@@ -486,6 +1165,7 @@ struct Index {
     if (!this.comboActive) {
       this.comboActive = true;
       this.comboKeys = [];
+      this.shiftLatch = false;
       return;
     }
     for (let i = this.comboKeys.length - 1; i >= 0; i--) {
@@ -494,6 +1174,7 @@ struct Index {
     }
     this.comboKeys = [];
     this.comboActive = false;
+    this.shiftLatch = false;
     this.shiftActive = false;
     this.ctrlActive = false;
     this.altActive = false;
@@ -524,7 +1205,7 @@ struct Index {
         }
       })
       .onClick(() => {
-        this.pressKey(code, extended);
+        this.pressKey(code, extended, label.length === 1 ? label : undefined);
       })
   }
 
@@ -553,7 +1234,7 @@ struct Index {
       }
     })
     .onClick(() => {
-      this.pressKey(code, extended);
+      this.pressKey(code, extended, top);
     })
   }
 
@@ -594,6 +1275,10 @@ struct Index {
         }
       })
       .onClick(() => {
+        if (code === 0x2A && !this.comboActive) {
+          this.shiftLatch = !this.shiftLatch;
+          return;
+        }
         if (this.comboActive) {
           sendKey(code, true, extended);
           this.comboKeys.push({ code: code, extended: extended });
@@ -639,6 +1324,38 @@ struct Index {
             .fontColor('#6B7280')
             .width('100%')
 
+          Row({ space: 8 }) {
+            Text('记录')
+              .fontSize(13)
+              .fontColor('#6B7280')
+            Select(this.connectionOptions())
+              .selected(this.selectedConnectionIndex)
+              .value(this.selectedConnectionLabel())
+              .font({ size: 13 })
+              .layoutWeight(1)
+              .onSelect((index: number, value: string) => {
+                this.selectedConnectionIndex = index;
+                if (index > 0 && index <= this.savedConnections.length) {
+                  this.applyProfile(this.savedConnections[index - 1]);
+                } else {
+                  this.selectedConnectionId = '';
+                }
+              })
+            Button('保存')
+              .fontSize(12)
+              .height(36)
+              .onClick(() => {
+                this.saveCurrentProfile(true);
+              })
+            Button('删除')
+              .fontSize(12)
+              .height(36)
+              .onClick(() => {
+                this.deleteSelectedProfile();
+              })
+          }
+          .width('100%')
+
           TextInput({ placeholder: '主机名或 IP，例如 192.0.2.10', text: this.host })
             .onChange((value: string) => {
               this.host = value;
@@ -675,6 +1392,72 @@ struct Index {
           }
           .width('100%')
 
+          Row({ space: 8 }) {
+            Toggle({ type: ToggleType.Switch, isOn: this.savePassword })
+              .onChange((isOn: boolean) => {
+                this.savePassword = isOn;
+                if (!this.loadingSettings && !this.applyingProfile) {
+                  this.saveConnectionSettings();
+                  if (this.selectedConnectionId.length > 0) {
+                    this.saveCurrentProfile();
+                  }
+                }
+              })
+            Text('记住密码')
+              .fontSize(13)
+              .fontColor('#374151')
+            Text('系统 Asset Store 加密保存')
+              .fontSize(11)
+              .fontColor('#9CA3AF')
+              .layoutWeight(1)
+          }
+          .width('100%')
+
+          Row({ space: 8 }) {
+            Text('分辨率')
+              .fontSize(13)
+              .fontColor('#6B7280')
+              .width(64)
+            Select([
+              { value: '自动（推荐）' },
+              { value: '1024×768' },
+              { value: '1280×800' },
+              { value: '1440×900' },
+              { value: '1600×900' },
+              { value: '1920×1080' }
+            ])
+              .selected(this.resolutionPreset)
+              .value(this.resolutionLabel())
+              .font({ size: 13 })
+              .layoutWeight(1)
+              .onSelect((index: number, value: string) => {
+                this.resolutionPreset = index;
+              })
+          }
+          .width('100%')
+
+          Row({ space: 8 }) {
+            Text('缩放')
+              .fontSize(13)
+              .fontColor('#6B7280')
+              .width(64)
+            Select([
+              { value: '100%（推荐）' },
+              { value: '125%' },
+              { value: '150%' },
+              { value: '175%' },
+              { value: '200%' }
+            ])
+              .selected(this.scalePreset)
+              .value(this.scaleLabel())
+              .font({ size: 13 })
+              .layoutWeight(1)
+              .onSelect((index: number, value: string) => {
+                this.scalePreset = index;
+              })
+          }
+          .width('100%')
+
           Button(this.isConnecting ? '连接中…' : '连接')
             .width('100%')
             .enabled(!this.isConnecting)
@@ -695,6 +1478,16 @@ struct Index {
             Text(this.status)
               .fontSize(12)
               .fontColor('#6B7280')
+            Button('中/英')
+              .fontSize(12)
+              .onClick(() => {
+                this.toggleRemoteIME();
+              })
+            Button(this.shiftCompat ? 'Shift兼容' : 'Shift原生')
+              .fontSize(11)
+              .onClick(() => {
+                this.toggleShiftMode();
+              })
             Button('键帽')
               .fontSize(12)
               .onClick(() => {
@@ -706,8 +1499,6 @@ struct Index {
                 this.disconnect();
               })
           }
-          .width('100%')
-
           .width('100%')
         }
 
@@ -815,7 +1606,7 @@ struct Index {
 
       if (this.connected) {
         Row({ space: 4 }) {
-          TextInput({ placeholder: '文本输入（中文/粘贴后可发送）', text: this.keyboardText })
+          TextInput({ placeholder: '本地文本输入（点画面切回远程键盘）', text: this.keyboardText })
             .onChange((value: string) => {
               this.keyboardText = value;
             })
@@ -951,7 +1742,7 @@ struct Index {
           .width('100%')
 
           Row({ space: 4 }) {
-            this.ModKey('Shift', 0x2A, this.shiftActive, false, 2)
+            this.ModKey('Shift', 0x2A, this.shiftActive || this.shiftLatch, false, 2)
             this.Key('Z', 0x2C)
             this.Key('X', 0x2D)
             this.Key('C', 0x2E)
@@ -962,7 +1753,7 @@ struct Index {
             this.Key2('<', ',', 0x33)
             this.Key2('>', '.', 0x34)
             this.Key2('?', '/', 0x35)
-            this.ModKey('Shift', 0x36, this.shiftActive, false, 2)
+            this.ModKey('Shift', 0x36, this.shiftActive || this.shiftLatch, false, 2)
             this.NavKey('↑', 0x48, true)
             this.NavKey('PgDn', 0x51, true)
           }
@@ -1012,6 +1803,13 @@ struct Index {
     .id('remoteKeyboard')
     .focusable(true)
     .defaultFocus(true)
+    .onBlur(() => {
+      console.info('LanRDP root blur');
+      this.releaseModifiers("onBlur");
+    })
+    .onFocus(() => {
+      console.info('LanRDP root focus');
+    })
     .onKeyEvent((event: KeyEvent) => {
       this.handleHardwareKey(event);
     })
