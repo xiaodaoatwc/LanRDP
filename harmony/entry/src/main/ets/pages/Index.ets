@@ -28,6 +28,7 @@ interface ScaleValues {
 interface SavedConnection {
   id: string;
   name?: string;
+  group?: string;
   host: string;
   port: string;
   username: string;
@@ -54,6 +55,13 @@ struct Index {
   @State private homeSection: number = 0;
   @State private showEditor: boolean = false;
   @State private showPasswordPrompt: boolean = false;
+  @State private groups: string[] = [];
+  @State private selectedGroup: string = '';
+  @State private editorGroup: string = '';
+  @State private showGroupPrompt: boolean = false;
+  @State private groupPromptText: string = '';
+  @State private groupPromptEditing: boolean = false;
+  @State private groupPromptFromEditor: boolean = false;
   @State private promptProfileId: string = '';
   @State private promptPassword: string = '';
   @State private promptRemember: boolean = false;
@@ -296,6 +304,30 @@ struct Index {
           console.info(`LanRDP parse profiles failed: ${String(error)}`);
         }
       }
+      const rawGroups = String(await pref.get('groups', ''));
+      const loadedGroups: string[] = [];
+      if (rawGroups.length > 0) {
+        try {
+          const parsedGroups = JSON.parse(rawGroups) as string[];
+          if (Array.isArray(parsedGroups)) {
+            parsedGroups.forEach((group: string) => {
+              if (group.length > 0 && !loadedGroups.includes(group)) {
+                loadedGroups.push(group);
+              }
+            });
+          }
+        } catch (error) {
+          console.info(`LanRDP parse groups failed: ${String(error)}`);
+        }
+      }
+      this.savedConnections.forEach((profile: SavedConnection) => {
+        const group = profile.group;
+        if (group !== undefined && group.length > 0 && !loadedGroups.includes(group)) {
+          loadedGroups.push(group);
+        }
+      });
+      this.groups = loadedGroups;
+
       if (this.host.length === 0) {
         this.host = host;
         this.portText = port.length > 0 ? port : '3389';
@@ -426,16 +458,170 @@ struct Index {
     return profile.port.length > 0 && profile.port !== '3389' ? `${name}:${profile.port}` : name;
   }
 
+  private baseConnections(): SavedConnection[] {
+    if (this.homeSection === 2) {
+      return this.savedConnections.filter((profile: SavedConnection) => profile.group === this.selectedGroup);
+    }
+    if (this.homeSection === 3) {
+      return this.savedConnections.filter((profile: SavedConnection) =>
+        profile.group === undefined || profile.group.length === 0);
+    }
+    return this.savedConnections;
+  }
+
+  private homeCount(): number {
+    return this.baseConnections().length;
+  }
+
+  private homeTitle(): string {
+    if (this.homeSection === 2) {
+      return this.selectedGroup;
+    }
+    if (this.homeSection === 3) {
+      return '未分组';
+    }
+    return '所有电脑';
+  }
+
+  private groupCount(name: string): number {
+    return this.savedConnections.filter((profile: SavedConnection) => profile.group === name).length;
+  }
+
+  private groupOptions(): SelectOption[] {
+    const options: SelectOption[] = [{ value: '未分组' }];
+    this.groups.forEach((group: string) => {
+      options.push({ value: group });
+    });
+    return options;
+  }
+
   private filteredConnections(): SavedConnection[] {
+    const base = this.baseConnections();
     const query = this.searchText.trim().toLowerCase();
     if (query.length === 0) {
-      return this.savedConnections;
+      return base;
     }
-    return this.savedConnections.filter((profile: SavedConnection) => {
+    return base.filter((profile: SavedConnection) => {
       return this.connectionLabel(profile).toLowerCase().includes(query) ||
         profile.host.toLowerCase().includes(query) ||
         profile.username.toLowerCase().includes(query);
     });
+  }
+
+  private async persistGroups(): Promise<void> {
+    try {
+      const pref = await this.getPref();
+      if (pref === null) {
+        return;
+      }
+      await pref.put('groups', JSON.stringify(this.groups));
+      await pref.flush();
+    } catch (error) {
+      console.info(`LanRDP persist groups failed: ${String(error)}`);
+    }
+  }
+
+  private openGroupPrompt(edit: boolean, fromEditor: boolean): void {
+    if (edit && this.selectedGroup.length === 0) {
+      promptAction.showToast({ message: '请先选择一个分组' });
+      return;
+    }
+    this.groupPromptEditing = edit;
+    this.groupPromptText = edit ? this.selectedGroup : '';
+    this.groupPromptFromEditor = fromEditor;
+    this.showGroupPrompt = true;
+    this.setEditorKeyboardMode();
+  }
+
+  private closeGroupPrompt(): void {
+    this.showGroupPrompt = false;
+    this.groupPromptText = '';
+    if (this.showEditor) {
+      this.setEditorKeyboardMode();
+    } else {
+      this.setRemoteKeyboardMode();
+    }
+  }
+
+  private async confirmGroupPrompt(): Promise<void> {
+    const name = this.groupPromptText.trim();
+    if (name.length === 0) {
+      promptAction.showToast({ message: '分组名称不能为空' });
+      return;
+    }
+    if (this.groupPromptEditing) {
+      const old = this.selectedGroup;
+      if (name !== old && this.groups.includes(name)) {
+        promptAction.showToast({ message: '已存在同名分组' });
+        return;
+      }
+      this.groups = this.groups.map((group: string) => group === old ? name : group);
+      this.savedConnections = this.savedConnections.map((profile: SavedConnection) => {
+        if (profile.group !== old) {
+          return profile;
+        }
+        return {
+          id: profile.id,
+          name: profile.name,
+          group: name,
+          host: profile.host,
+          port: profile.port,
+          username: profile.username,
+          domain: profile.domain,
+          resolutionPreset: profile.resolutionPreset,
+          scalePreset: profile.scalePreset,
+          savePassword: profile.savePassword
+        };
+      });
+      this.selectedGroup = name;
+      await this.persistProfiles();
+      await this.persistGroups();
+      this.status = '已重命名分组';
+    } else {
+      if (!this.groups.includes(name)) {
+        this.groups = this.groups.concat([name]);
+      }
+      if (this.groupPromptFromEditor) {
+        this.editorGroup = name;
+      } else {
+        this.homeSection = 2;
+        this.selectedGroup = name;
+        this.showEditor = false;
+      }
+      await this.persistGroups();
+      this.status = '已创建分组';
+    }
+    this.closeGroupPrompt();
+  }
+
+  private async deleteCurrentGroup(): Promise<void> {
+    const name = this.selectedGroup;
+    if (name.length === 0) {
+      return;
+    }
+    this.groups = this.groups.filter((group: string) => group !== name);
+    this.savedConnections = this.savedConnections.map((profile: SavedConnection) => {
+      if (profile.group !== name) {
+        return profile;
+      }
+      return {
+        id: profile.id,
+        name: profile.name,
+        group: '',
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+        domain: profile.domain,
+        resolutionPreset: profile.resolutionPreset,
+        scalePreset: profile.scalePreset,
+        savePassword: profile.savePassword
+      };
+    });
+    this.selectedGroup = '';
+    this.homeSection = 0;
+    await this.persistProfiles();
+    await this.persistGroups();
+    this.status = '已删除分组，电脑已移到未分组';
   }
 
   private connectionLoginLabel(profile: SavedConnection): string {
@@ -466,6 +652,7 @@ struct Index {
     this.savePassword = false;
     this.resolutionPreset = 0;
     this.scalePreset = 0;
+    this.editorGroup = this.homeSection === 2 ? this.selectedGroup : '';
     this.homeSection = 0;
     this.showEditor = true;
     this.setEditorKeyboardMode();
@@ -642,6 +829,7 @@ struct Index {
     try {
       this.selectedConnectionId = profile.id;
       this.editorName = profile.name !== undefined ? profile.name : '';
+      this.editorGroup = profile.group !== undefined ? profile.group : '';
       this.host = profile.host;
       this.portText = profile.port.length > 0 ? profile.port : '3389';
       this.username = profile.username;
@@ -704,9 +892,15 @@ struct Index {
     }
 
     const existingName = index >= 0 ? this.savedConnections[index].name : undefined;
+    const groupName = this.editorGroup.trim();
+    if (groupName.length > 0 && !this.groups.includes(groupName)) {
+      this.groups = this.groups.concat([groupName]);
+      await this.persistGroups();
+    }
     const profile: SavedConnection = {
       id: id,
       name: this.editorName.trim().length > 0 ? this.editorName.trim() : existingName,
+      group: groupName,
       host: host,
       port: this.portText.trim(),
       username: this.username.trim(),
@@ -1565,6 +1759,11 @@ struct Index {
         Text(String(this.savedConnections.length))
           .fontSize(11)
           .fontColor('#8E8E93')
+      } else if (section === 3) {
+        Text(String(this.savedConnections.filter((profile: SavedConnection) =>
+          profile.group === undefined || profile.group.length === 0).length))
+          .fontSize(11)
+          .fontColor('#8E8E93')
       }
     }
     .width('100%')
@@ -1574,6 +1773,32 @@ struct Index {
     .borderRadius(8)
     .onClick(() => {
       this.homeSection = section;
+      this.closeEditor();
+    })
+  }
+
+  @Builder
+  GroupSidebarRow(name: string) {
+    Row({ space: 10 }) {
+      Text('📁')
+        .fontSize(14)
+      Text(name)
+        .fontSize(13)
+        .fontColor(this.homeSection === 2 && this.selectedGroup === name ? '#0A84FF' : '#1C1C1E')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+      Text(String(this.groupCount(name)))
+        .fontSize(11)
+        .fontColor('#8E8E93')
+    }
+    .width('100%')
+    .height(34)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.homeSection === 2 && this.selectedGroup === name && !this.showEditor ? '#0A84FF14' : Color.Transparent)
+    .onClick(() => {
+      this.homeSection = 2;
+      this.selectedGroup = name;
       this.closeEditor();
     })
   }
@@ -1602,11 +1827,29 @@ struct Index {
 
       this.SidebarRow('🖥', '所有电脑', 0)
 
+      ForEach(this.groups, (group: string) => {
+        this.GroupSidebarRow(group)
+      }, (group: string) => group)
+
+      this.SidebarRow('🗂', '未分组', 3)
+
       Blank()
 
       Divider()
         .color('#D1D1D6')
       this.SidebarRow('⚙', '设置', 1)
+
+      Button('＋ 新建分组')
+        .width('100%')
+        .height(38)
+        .fontSize(13)
+        .fontColor('#6B7280')
+        .backgroundColor(Color.Transparent)
+        .borderRadius(8)
+        .margin({ left: 8, right: 8 })
+        .onClick(() => {
+          this.openGroupPrompt(false, false);
+        })
 
       Button('＋ 添加 PC')
         .width('100%')
@@ -1694,7 +1937,7 @@ struct Index {
       .width('100%')
 
       Row({ space: 8 }) {
-        Text('未分组')
+        Text(profile.group !== undefined && profile.group.length > 0 ? profile.group : '未分组')
           .fontSize(10)
           .fontColor('#6B7280')
           .backgroundColor('#F2F2F7')
@@ -1741,16 +1984,34 @@ struct Index {
     Column() {
       Row() {
         Column({ space: 4 }) {
-          Text('所有电脑')
+          Text(this.homeTitle())
             .fontSize(28)
             .fontWeight(FontWeight.Bold)
             .fontColor('#1C1C1E')
-          Text(`${this.savedConnections.length} 台电脑 · 局域网 / 广域网远程桌面`)
+          Text(`${this.homeCount()} 台电脑 · 局域网 / 广域网远程桌面`)
             .fontSize(13)
             .fontColor('#8E8E93')
         }
         .alignItems(HorizontalAlign.Start)
         Blank()
+        if (this.homeSection === 2) {
+          Button('重命名')
+            .fontSize(12)
+            .height(34)
+            .fontColor('#0A84FF')
+            .backgroundColor('#EAF2FF')
+            .onClick(() => {
+              this.openGroupPrompt(true, false);
+            })
+          Button('删除分组')
+            .fontSize(12)
+            .height(34)
+            .fontColor('#FF3B30')
+            .backgroundColor('#FFF0EF')
+            .onClick(() => {
+              this.deleteCurrentGroup();
+            })
+        }
         Button('＋ 添加 PC')
           .fontSize(13)
           .height(38)
@@ -1777,17 +2038,17 @@ struct Index {
       .width('100%')
       .padding({ left: 24, right: 24, bottom: 14 })
 
-      if (this.savedConnections.length === 0) {
+      if (this.baseConnections().length === 0) {
         Column({ space: 12 }) {
-          Text('🖥')
+          Text(this.homeSection === 2 ? '📁' : '🖥')
             .fontSize(44)
-          Text('还没有电脑')
+          Text(this.homeSection === 2 ? '这个分组还没有电脑' : '还没有电脑')
             .fontSize(18)
             .fontWeight(FontWeight.Medium)
-          Text('添加一台 Windows 电脑，开始局域网远程桌面。')
+          Text(this.homeSection === 2 ? '添加电脑时会自动归入这个分组。' : '添加一台 Windows 电脑，开始局域网远程桌面。')
             .fontSize(12)
             .fontColor('#8E8E93')
-          Button('添加第一台 PC')
+          Button(this.homeSection === 2 ? '添加到此分组' : '添加第一台 PC')
             .fontSize(13)
             .backgroundColor('#0A84FF')
             .fontColor(Color.White)
@@ -1999,6 +2260,27 @@ struct Index {
             this.FormField('域（可选）', '例如 DESKTOP-ABC', this.domain, (value: string) => {
               this.domain = value;
             })
+            Row({ space: 8 }) {
+              Text('分组')
+                .fontSize(11)
+                .fontColor('#6B7280')
+                .width(64)
+              Select(this.groupOptions())
+                .selected(this.editorGroup.length === 0 ? 0 : this.groups.indexOf(this.editorGroup) + 1)
+                .value(this.editorGroup.length > 0 ? this.editorGroup : '未分组')
+                .font({ size: 13 })
+                .layoutWeight(1)
+                .onSelect((index: number) => {
+                  this.editorGroup = index === 0 ? '' : this.groups[index - 1];
+                })
+              Button('新建')
+                .fontSize(11)
+                .height(34)
+                .onClick(() => {
+                  this.openGroupPrompt(false, true);
+                })
+            }
+            .width('100%')
             this.FormField('密码', '密码', this.password, (value: string) => {
               this.password = value;
             }, true)
@@ -2196,6 +2478,63 @@ struct Index {
   }
 
   @Builder
+  GroupPrompt() {
+    Column() {
+      Column({ space: 14 }) {
+        Text(this.groupPromptEditing ? '重命名分组' : '新建分组')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1C1C1E')
+          .width('100%')
+        Text(this.groupPromptFromEditor ? '创建后会自动选中这个分组' : '分组用于在左侧整理电脑')
+          .fontSize(12)
+          .fontColor('#8E8E93')
+          .width('100%')
+        TextInput({ placeholder: '分组名称', text: this.groupPromptText })
+          .height(42)
+          .fontSize(13)
+          .backgroundColor('#F7F7FA')
+          .borderRadius(8)
+          .defaultFocus(true)
+          .onChange((value: string) => {
+            this.groupPromptText = value;
+          })
+          .onSubmit(() => {
+            this.confirmGroupPrompt();
+          })
+          .width('100%')
+        Row({ space: 10 }) {
+          Button('取消')
+            .fontSize(13)
+            .onClick(() => {
+              this.closeGroupPrompt();
+            })
+          Blank()
+          Button(this.groupPromptEditing ? '保存' : '创建')
+            .fontSize(13)
+            .backgroundColor('#0A84FF')
+            .fontColor(Color.White)
+            .onClick(() => {
+              this.confirmGroupPrompt();
+            })
+        }
+        .width('100%')
+      }
+      .width('90%')
+      .constraintSize({ maxWidth: 420 })
+      .padding(24)
+      .backgroundColor(Color.White)
+      .borderRadius(18)
+      .shadow({ radius: 30, color: '#00000033', offsetX: 0, offsetY: 10 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#00000055')
+  }
+
+  @Builder
   HomeShell() {
     Stack() {
       Row() {
@@ -2217,6 +2556,10 @@ struct Index {
 
       if (this.showPasswordPrompt) {
         this.PasswordPrompt()
+      }
+
+      if (this.showGroupPrompt) {
+        this.GroupPrompt()
       }
     }
     .width('100%')
