@@ -124,6 +124,14 @@ struct Index {
   private lastTouchY: number = 0;
   private lastWheelY: number = -1;
   private lastPanOffsetY: number = 0;
+  private twoFingerActive: boolean = false;
+  private twoFingerTapCandidate: boolean = false;
+  private twoFingerScroll: boolean = false;
+  private twoFingerStartTime: number = 0;
+  private twoFingerStartX: number = 0;
+  private twoFingerStartY: number = 0;
+  private twoFingerLastX: number = 0;
+  private twoFingerLastY: number = 0;
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
@@ -1094,8 +1102,20 @@ struct Index {
     this.status = detail.length > 0 ? `连接已断开：${detail}` : '连接已断开';
   }
 
+  private finishTwoFingerGesture(): void {
+    if (this.twoFingerActive && this.twoFingerTapCandidate && !this.twoFingerScroll &&
+        Date.now() - this.twoFingerStartTime < 350) {
+      this.sendMouseAt(this.twoFingerLastX, this.twoFingerLastY, true, 2);
+      this.sendMouseAt(this.twoFingerLastX, this.twoFingerLastY, false, 2);
+    }
+    this.twoFingerActive = false;
+    this.twoFingerTapCandidate = false;
+    this.twoFingerScroll = false;
+  }
+
   private handleTouch(event: TouchEvent): void {
     if (event.touches.length === 0) {
+      this.finishTwoFingerGesture();
       this.cancelLongPress();
       if (this.mouseDown && !this.longPressTriggered) {
         this.sendMouseAt(this.lastTouchX, this.lastTouchY, false);
@@ -1134,7 +1154,32 @@ struct Index {
         this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
         this.mouseDown = false;
       }
+      const second = event.touches[1];
+      const secondX = second.windowX - this.imageGlobalX;
+      const secondY = second.windowY - this.imageGlobalY;
+      const averageX = (touchX + secondX) / 2;
+      const averageY = (touchY + secondY) / 2;
+      if (!this.twoFingerActive) {
+        this.twoFingerActive = true;
+        this.twoFingerTapCandidate = !this.longPressTriggered;
+        this.twoFingerScroll = false;
+        this.twoFingerStartTime = Date.now();
+        this.twoFingerStartX = averageX;
+        this.twoFingerStartY = averageY;
+      }
+      this.twoFingerLastX = averageX;
+      this.twoFingerLastY = averageY;
+      const dx = averageX - this.twoFingerStartX;
+      const dy = averageY - this.twoFingerStartY;
+      if (Math.sqrt(dx * dx + dy * dy) > 12) {
+        this.twoFingerScroll = true;
+      }
       this.lastWheelY = -1;
+      return;
+    }
+
+    if (this.twoFingerActive) {
+      this.finishTwoFingerGesture();
       return;
     }
 
@@ -2658,6 +2703,7 @@ struct Index {
                     if (Math.abs(delta) >= threshold) {
                       const steps = Math.min(3, Math.floor(Math.abs(delta) / threshold));
                       const direction = delta > 0 ? 120 : -120;
+                      this.twoFingerScroll = true;
                       for (let i = 0; i < steps; i++) {
                         sendWheel(direction);
                       }
@@ -2669,6 +2715,9 @@ struct Index {
                     this.pinchStartScale = this.viewScale;
                   })
                   .onActionUpdate((event: GestureEvent) => {
+                    if (Math.abs(event.scale - 1) > 0.01) {
+                      this.twoFingerScroll = true;
+                    }
                     this.viewScale = Math.max(0.5, Math.min(3, this.pinchStartScale * event.scale));
                   })
               )
