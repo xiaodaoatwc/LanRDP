@@ -4,7 +4,7 @@ import { display, KeyboardAvoidMode, promptAction, window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { bindFrameMaps, connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
+import { ackFrame, bindFrameMaps, connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -1122,6 +1122,10 @@ struct Index {
           this.frameWidth = info.width;
           this.frameHeight = info.height;
           this.noteFrameRendered(info.width, info.height);
+          const ackIndex = info.frameIndex;
+          setTimeout(() => {
+            ackFrame(ackIndex);
+          }, 16);
         }
       }
       return;

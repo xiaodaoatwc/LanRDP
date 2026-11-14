@@ -79,6 +79,7 @@ struct Session {
     int backStride = 0;
     int frameIndex = 0;
     int writeIndex = 1;
+    int displayIndex = 0;
     bool nativeBound = false;
     int width = 0;
     int height = 0;
@@ -118,6 +119,7 @@ static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
     session->backStride = 0;
     session->frameIndex = 0;
     session->writeIndex = 1;
+    session->displayIndex = 0;
     session->nativeBound = false;
 }
 
@@ -157,7 +159,11 @@ static BOOL SessionEndPaint(rdpContext* context)
     const BYTE* source = gdi->primary_buffer;
     std::lock_guard<std::mutex> lock(session->mutex);
     if (session->nativeBound) {
-        const bool useFront = session->writeIndex == 0;
+        if (session->frameIndex != session->displayIndex) {
+            return TRUE;
+        }
+        const int targetIndex = 1 - session->displayIndex;
+        const bool useFront = targetIndex == 0;
         NativePixelMap* target = useFront ? session->frontNative : session->backNative;
         const int targetStride = useFront ? session->frontStride : session->backStride;
         if (target && targetStride >= width * 4 &&
@@ -171,8 +177,8 @@ static BOOL SessionEndPaint(rdpContext* context)
                     source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
                 OH_PixelMap_UnAccessPixels(target);
                 if (copied) {
-                    session->frameIndex = session->writeIndex;
-                    session->writeIndex = 1 - session->writeIndex;
+                    session->frameIndex = targetIndex;
+                    session->writeIndex = 1 - targetIndex;
                     ++session->version;
                     return TRUE;
                 }
@@ -603,8 +609,35 @@ static napi_value BindFrameMaps(napi_env env, napi_callback_info info)
     session->backStride = backStride;
     session->frameIndex = 0;
     session->writeIndex = 1;
+    session->displayIndex = 0;
     session->nativeBound = true;
     napi_get_boolean(env, true, &result);
+    return result;
+}
+
+static napi_value AckFrame(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t index = -1;
+    if (argc >= 1) {
+        napi_get_value_int32(env, args[0], &index);
+    }
+    napi_value result;
+    napi_get_boolean(env, false, &result);
+    if (index < 0 || index > 1) {
+        return result;
+    }
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    Session* session = g_session;
+    if (session) {
+        std::lock_guard<std::mutex> frameLock(session->mutex);
+        if (session->nativeBound) {
+            session->displayIndex = index;
+            napi_get_boolean(env, true, &result);
+        }
+    }
     return result;
 }
 
@@ -839,6 +872,7 @@ static napi_value Init(napi_env env, napi_value exports)
         { "getFrame", nullptr, GetFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "bindFrameMaps", nullptr, BindFrameMaps, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "unbindFrameMaps", nullptr, UnbindFrameMaps, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "ackFrame", nullptr, AckFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendMouse", nullptr, SendMouse, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr },
