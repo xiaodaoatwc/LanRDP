@@ -129,6 +129,9 @@ struct Index {
   private frameBusy: boolean = false;
   private fpsFrames: number = 0;
   private fpsStart: number = 0;
+  private frameGetTotal: number = 0;
+  private framePixelTotal: number = 0;
+  private frameStatsCount: number = 0;
   private sessionEpoch: number = 0;
   private longPressTimer: number = -1;
   private longPressTriggered: boolean = false;
@@ -1084,7 +1087,9 @@ struct Index {
     this.frameBusy = true;
     const epoch = this.sessionEpoch;
     try {
+      const getStart = Date.now();
       const frame = getFrame();
+      const getMs = Date.now() - getStart;
       if (!frame) {
         return;
       }
@@ -1093,11 +1098,22 @@ struct Index {
       }
       const options: image.InitializationOptions = {
         size: { width: frame.width, height: frame.height },
-        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        pixelFormat: image.PixelMapFormat.BGRA_8888,
         editable: false,
         alphaType: image.AlphaType.OPAQUE
       };
+      const pixelStart = Date.now();
       const pixelMap = await image.createPixelMap(frame.data, options);
+      const pixelMs = Date.now() - pixelStart;
+      this.frameGetTotal += getMs;
+      this.framePixelTotal += pixelMs;
+      this.frameStatsCount++;
+      if (this.frameStatsCount >= 60) {
+        console.info(`LanRDP frame avg get=${this.frameGetTotal / 60}ms pixel=${this.framePixelTotal / 60}ms`);
+        this.frameGetTotal = 0;
+        this.framePixelTotal = 0;
+        this.frameStatsCount = 0;
+      }
       if (epoch !== this.sessionEpoch) {
         pixelMap.release();
         return;

@@ -123,17 +123,11 @@ static BOOL SessionEndPaint(rdpContext* context)
     std::lock_guard<std::mutex> lock(session->mutex);
     session->pixels.resize(static_cast<size_t>(width) * height * 4);
     const BOOL converted = freerdp_image_copy(
-        session->pixels.data(), PIXEL_FORMAT_RGBA32, static_cast<UINT32>(width * 4),
+        session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
         0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
         source, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
     if (!converted)
         return TRUE;
-
-    /* OHOS PixelMap RGBA_8888 expects R,G,B,A while the FreeRDP
-     * compatibility path on this platform produces B,G,R,A. */
-    for (size_t i = 0; i + 3 < session->pixels.size(); i += 4) {
-        std::swap(session->pixels[i], session->pixels[i + 2]);
-    }
 
     session->width = width;
     session->height = height;
@@ -197,7 +191,7 @@ static BOOL SessionPostConnect(freerdp* instance)
 {
     if (!instance || !instance->context)
         return FALSE;
-    if (!gdi_init(instance, PIXEL_FORMAT_RGBA32))
+    if (!gdi_init(instance, PIXEL_FORMAT_BGRA32))
         return FALSE;
     instance->context->update->BeginPaint = SessionBeginPaint;
     instance->context->update->EndPaint = SessionEndPaint;
