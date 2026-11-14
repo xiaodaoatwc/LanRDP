@@ -1134,15 +1134,7 @@ struct Index {
         this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
         this.mouseDown = false;
       }
-      const second = event.touches[1];
-      const secondY = second.windowY - this.imageGlobalY;
-      const averageY = (touchY + secondY) / 2;
-      if (this.lastWheelY >= 0 && Math.abs(averageY - this.lastWheelY) >= 12) {
-        sendWheel(averageY < this.lastWheelY ? 120 : -120);
-        this.lastWheelY = averageY;
-      } else if (this.lastWheelY < 0) {
-        this.lastWheelY = averageY;
-      }
+      this.lastWheelY = -1;
       return;
     }
 
@@ -1160,14 +1152,16 @@ struct Index {
       this.sendMouseAt(touchX, touchY, true);
 
       this.cancelLongPress();
-      this.longPressTimer = setTimeout(() => {
-        if (this.mouseDown && !this.touchMoved && !this.longPressTriggered) {
-          this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
-          this.sendMouseAt(this.lastTouchX, this.lastTouchY, true, 2);
-          this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 2);
-          this.longPressTriggered = true;
-        }
-      }, 550);
+      if (event.source === SourceType.TouchScreen) {
+        this.longPressTimer = setTimeout(() => {
+          if (this.mouseDown && !this.touchMoved && !this.longPressTriggered) {
+            this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 1);
+            this.sendMouseAt(this.lastTouchX, this.lastTouchY, true, 2);
+            this.sendMouseAt(this.lastTouchX, this.lastTouchY, false, 2);
+            this.longPressTriggered = true;
+          }
+        }, 550);
+      }
     } else if (event.type === TouchType.Move && this.mouseDown) {
       if (Math.abs(touchX - previousX) > 6 || Math.abs(touchY - previousY) > 6) {
         this.touchMoved = true;
@@ -1181,7 +1175,7 @@ struct Index {
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
       this.cancelLongPress();
       const held = Date.now() - this.touchStartTime;
-      if (!this.longPressTriggered && held > 550 && !this.touchMoved) {
+      if (!this.longPressTriggered && event.source === SourceType.TouchScreen && held > 550 && !this.touchMoved) {
         this.sendMouseAt(touchX, touchY, false, 1);
         this.sendMouseAt(touchX, touchY, true, 2);
         this.sendMouseAt(touchX, touchY, false, 2);
@@ -2612,6 +2606,8 @@ struct Index {
             .width('100%')
             .layoutWeight(1)
             .objectFit(ImageFit.Contain)
+            .draggable(false)
+            .enableAnalyzer(false)
             .backgroundColor('#000000')
             .borderRadius(8)
             .translate({ y: this.viewOffsetY })
@@ -2652,23 +2648,20 @@ struct Index {
             })
             .gesture(
               GestureGroup(GestureMode.Parallel,
-                TapGesture({ count: 1, fingers: 2 })
-                  .onAction((event: GestureEvent) => {
-                    if (event.fingerList.length > 0) {
-                      const finger = event.fingerList[0];
-                      this.sendMouseAt(finger.localX, finger.localY, true, 2);
-                      this.sendMouseAt(finger.localX, finger.localY, false, 2);
-                    }
-                  }),
-                PanGesture({ fingers: 2, direction: PanDirection.Vertical, distance: 4 })
+                PanGesture({ fingers: 2, direction: PanDirection.Vertical, distance: 6 })
                   .onActionStart(() => {
                     this.lastPanOffsetY = 0;
                   })
                   .onActionUpdate((event: GestureEvent) => {
                     const delta = event.offsetY - this.lastPanOffsetY;
-                    if (Math.abs(delta) >= 10) {
-                      sendWheel(delta > 0 ? -120 : 120);
-                      this.lastPanOffsetY = event.offsetY;
+                    const threshold = 56;
+                    if (Math.abs(delta) >= threshold) {
+                      const steps = Math.min(3, Math.floor(Math.abs(delta) / threshold));
+                      const direction = delta > 0 ? 120 : -120;
+                      for (let i = 0; i < steps; i++) {
+                        sendWheel(direction);
+                      }
+                      this.lastPanOffsetY += (delta > 0 ? steps : -steps) * threshold;
                     }
                   }),
                 PinchGesture({ fingers: 2 })
