@@ -1005,9 +1005,23 @@ struct XTestRenderer {
     int textureHeight = 0;
     uint64_t textureVersion = 0;
 
+    void ResetGlState()
+    {
+        program = 0;
+        texture = 0;
+        vbo = 0;
+        vao = 0;
+        textureUniform = -1;
+        quadUniform = -1;
+        textureWidth = 0;
+        textureHeight = 0;
+        textureVersion = 0;
+    }
+
     void Start(void* window)
     {
         Stop();
+        ResetGlState();
         running.store(true);
         thread = std::thread(&XTestRenderer::RenderLoop, this, window);
     }
@@ -1018,6 +1032,7 @@ struct XTestRenderer {
         if (thread.joinable()) {
             thread.join();
         }
+        ResetGlState();
     }
 
     void SetSize(int w, int h)
