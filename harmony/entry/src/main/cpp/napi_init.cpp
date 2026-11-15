@@ -216,7 +216,7 @@ static void FlushNativeFrame(Session* session)
         return;
     }
     const auto now = std::chrono::steady_clock::now();
-    const int frameIntervalMs = g_xComponentActive.load() ? 16 : 8;
+    const int frameIntervalMs = 16;
     if (session->hasNativeFrameTime &&
         std::chrono::duration_cast<std::chrono::milliseconds>(now - session->lastNativeFrameTime).count() < frameIntervalMs) {
         return;
@@ -454,13 +454,6 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
         freerdp_settings_set_string(settings, FreeRDP_Domain, domain.c_str());
     freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxH264, FALSE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, FALSE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxCodecAV1, FALSE);
-    freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, TRUE);
     freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000);
     const uint32_t width = (desktopWidth >= 640 && desktopWidth <= 4096) ? desktopWidth : 1024;
     const uint32_t height = (desktopHeight >= 480 && desktopHeight <= 4096) ? desktopHeight : 768;
