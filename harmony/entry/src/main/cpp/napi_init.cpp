@@ -1000,6 +1000,7 @@ struct XTestRenderer {
     GLuint vbo = 0;
     GLuint vao = 0;
     GLint textureUniform = -1;
+    GLint quadUniform = -1;
     int textureWidth = 0;
     int textureHeight = 0;
     uint64_t textureVersion = 0;
@@ -1031,18 +1032,17 @@ struct XTestRenderer {
     {
         static const char* vertexSource =
             "attribute vec2 aPos;\n"
-            "attribute vec2 aTex;\n"
-            "varying vec2 vTex;\n"
             "void main() {\n"
-            "  vTex = aTex;\n"
             "  gl_Position = vec4(aPos, 0.0, 1.0);\n"
             "}\n";
         static const char* fragmentSource =
             "precision mediump float;\n"
-            "varying vec2 vTex;\n"
             "uniform sampler2D uTexture;\n"
+            "uniform vec4 uQuad;\n"
             "void main() {\n"
-            "  vec4 color = texture2D(uTexture, vTex);\n"
+            "  vec2 uv = vec2((gl_FragCoord.x - uQuad.x) / uQuad.z,\n"
+            "                 1.0 - (gl_FragCoord.y - uQuad.y) / uQuad.w);\n"
+            "  vec4 color = texture2D(uTexture, uv);\n"
             "  gl_FragColor = vec4(color.b, color.g, color.r, color.a);\n"
             "}\n";
         GLuint vs = CompileShader(GL_VERTEX_SHADER, vertexSource);
@@ -1056,7 +1056,6 @@ struct XTestRenderer {
         glAttachShader(prog, vs);
         glAttachShader(prog, fs);
         glBindAttribLocation(prog, 0, "aPos");
-        glBindAttribLocation(prog, 1, "aTex");
         glLinkProgram(prog);
         glDeleteShader(vs);
         glDeleteShader(fs);
@@ -1093,8 +1092,14 @@ struct XTestRenderer {
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, frameWidth, frameHeight,
                             GL_RGBA, GL_UNSIGNED_BYTE, data);
         }
+        uint32_t sample = 0;
+        if (data && frameWidth > 0 && frameHeight > 0) {
+            const size_t sampleOffset = (static_cast<size_t>(frameHeight / 2) * frameWidth + frameWidth / 2) * 4;
+            std::memcpy(&sample, data + sampleOffset, sizeof(sample));
+        }
         textureVersion = version;
-        OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX", "texture %{public}dx%{public}d", frameWidth, frameHeight);
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX",
+            "texture %{public}dx%{public}d sample=%{public}08x", frameWidth, frameHeight, sample);
     }
 
     void RenderLoop(void* window)
@@ -1146,6 +1151,7 @@ struct XTestRenderer {
             return;
         }
         textureUniform = glGetUniformLocation(program, "uTexture");
+        quadUniform = glGetUniformLocation(program, "uQuad");
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
         glGenBuffers(1, &vbo);
@@ -1194,27 +1200,31 @@ struct XTestRenderer {
                 const float y0 = 1.0f - 2.0f * top / h;
                 const float y1 = 1.0f - 2.0f * (top + drawHeight) / h;
                 const float vertices[] = {
-                    x0, y0, 0.0f, 0.0f,
-                    x0, y1, 0.0f, 1.0f,
-                    x1, y1, 1.0f, 1.0f,
-                    x0, y0, 0.0f, 0.0f,
-                    x1, y1, 1.0f, 1.0f,
-                    x1, y0, 1.0f, 0.0f
+                    x0, y0,
+                    x0, y1,
+                    x1, y1,
+                    x0, y0,
+                    x1, y1,
+                    x1, y0
                 };
+                const float bottom = h - (top + drawHeight);
                 glUseProgram(program);
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, texture);
+                glUniform4f(quadUniform, left, bottom, drawWidth, drawHeight);
                 glBindVertexArray(vao);
                 glBindBuffer(GL_ARRAY_BUFFER, vbo);
                 glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
                 glEnableVertexAttribArray(0);
-                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
-                glEnableVertexAttribArray(1);
-                glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                    reinterpret_cast<void*>(2 * sizeof(float)));
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
                 glDrawArrays(GL_TRIANGLES, 0, 6);
                 glDisableVertexAttribArray(0);
-                glDisableVertexAttribArray(1);
+                GLenum glError = glGetError();
+                if (glError != GL_NO_ERROR) {
+                    OH_LOG_Print(LOG_APP, LOG_ERROR, 0xFF00, "LanRDPX",
+                        "draw error=%{public}u quad=%{public}f,%{public}f,%{public}f,%{public}f",
+                        static_cast<unsigned>(glError), x0, y0, x1, y1);
+                }
             }
             if (!eglSwapBuffers(display, surface)) {
                 break;
