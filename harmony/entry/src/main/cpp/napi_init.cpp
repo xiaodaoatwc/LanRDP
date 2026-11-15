@@ -454,6 +454,13 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
         freerdp_settings_set_string(settings, FreeRDP_Domain, domain.c_str());
     freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxH264, FALSE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, FALSE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxCodecAV1, FALSE);
+    freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, TRUE);
     freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000);
     const uint32_t width = (desktopWidth >= 640 && desktopWidth <= 4096) ? desktopWidth : 1024;
     const uint32_t height = (desktopHeight >= 480 && desktopHeight <= 4096) ? desktopHeight : 768;
@@ -1170,6 +1177,12 @@ struct XTestRenderer {
         glUseProgram(program);
         glUniform1i(textureUniform, 0);
         OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX", "renderer ready");
+        bool force_draw = true;
+        float last_scale = -1.0f;
+        float last_offset_x = 0.0f;
+        float last_offset_y = 0.0f;
+        int last_width = 0;
+        int last_height = 0;
 
         while (running.load()) {
             const int w = width.load();
@@ -1180,6 +1193,7 @@ struct XTestRenderer {
             }
             int frameWidth = 0;
             int frameHeight = 0;
+            bool uploaded = false;
             {
                 std::lock_guard<std::mutex> sessionLock(g_sessionMutex);
                 Session* session = g_session;
@@ -1190,17 +1204,30 @@ struct XTestRenderer {
                     if (!session->pixels.empty() && session->version != textureVersion &&
                         frameWidth > 0 && frameHeight > 0) {
                         UploadTexture(session->pixels.data(), frameWidth, frameHeight, session->version);
+                        uploaded = true;
                     }
                 }
             }
 
+            const float scale = g_xViewScale.load();
+            const float offsetX = g_xOffsetX.load();
+            const float offsetY = g_xOffsetY.load();
+            const bool changed = force_draw || uploaded || w != last_width || h != last_height ||
+                scale != last_scale || offsetX != last_offset_x || offsetY != last_offset_y;
+            if (!changed) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                continue;
+            }
+            force_draw = false;
+            last_width = w;
+            last_height = h;
+            last_scale = scale;
+            last_offset_x = offsetX;
+            last_offset_y = offsetY;
             glViewport(0, 0, w, h);
             glClearColor(242.0f / 255.0f, 242.0f / 255.0f, 247.0f / 255.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
             if (texture != 0 && textureWidth > 0 && textureHeight > 0) {
-                const float scale = g_xViewScale.load();
-                const float offsetX = g_xOffsetX.load();
-                const float offsetY = g_xOffsetY.load();
                 const float base = std::min(static_cast<float>(w) / textureWidth,
                     static_cast<float>(h) / textureHeight);
                 const float drawWidth = textureWidth * base * scale;
