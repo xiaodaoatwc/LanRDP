@@ -57,3 +57,31 @@ Planned direction:
 The app is ad-hoc signed, not notarized by Apple. If macOS blocks the first launch, right-click the app and choose Open, or remove the quarantine attribute.
 
 App 使用 ad-hoc 签名，未经过 Apple 公证。首次启动被拦截时，可右键选择“打开”，或移除 quarantine 属性。
+
+## 3. Windows 10 主机上任务管理器图表不刷新（主机侧）
+
+**Status: not a client issue / 非客户端问题**
+
+某些 Windows 10 主机（已确认一台：旧款 ThinkPad + Intel 核显）在远程会话里，任务管理器“性能”页的图表会停住不动；同一台客户端连接 Windows Server 2025 时图表正常。
+
+关键验证：**用微软 Remote Desktop 连接同一台 Windows 10，图表同样不动**。因此不是 LanRDP / FreeRDP 的问题，而是主机侧（DWM/显卡驱动/任务管理器的渲染路径）的问题。
+
+可尝试的主机侧检查：
+
+- 任务管理器 → 查看 → 更新速度，确认不是“暂停”；
+- 更新 Intel 显卡驱动；
+- 关闭“硬件加速 GPU 计划”（设置 → 系统 → 显示 → 图形设置），重启后再试；
+- 升级到 Windows 10 22H2 的最新补丁；
+- 在物理控制台上观察同一页图表是否正常，用于区分“仅远程会话”还是“本机也不刷新”。
+
+Some Windows 10 hosts (observed on an older ThinkPad with Intel integrated graphics) stop updating the Task Manager performance graphs inside a remote session, while the same client works fine against Windows Server 2025.
+
+Key check: Microsoft Remote Desktop shows the same frozen graphs on that host, so this is a host-side rendering issue (DWM / GPU driver / Task Manager), not a LanRDP or FreeRDP bug.
+
+Host-side things worth trying:
+
+- Task Manager → View → Update speed: make sure it is not Paused;
+- Update the Intel graphics driver;
+- Disable “Hardware-accelerated GPU scheduling”, reboot and retry;
+- Update Windows 10 to the latest 22H2 patch level;
+- Compare with the physical console: does the graph update there?

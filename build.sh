@@ -6,6 +6,16 @@ BUILD="$ROOT/.build"
 APP="$ROOT/build/LanRDP.app"
 FREERDP_BIN="$BUILD/build/freerdp-sdl/client/SDL/SDL3/sdl-freerdp"
 OPENSSL_DIR="/opt/homebrew/opt/openssl@3/lib"
+FFMPEG_DIR="$BUILD/ffmpeg-lgpl/arm64/lib"
+FFMPEG_LIBS=(
+    libavcodec.63.dylib
+    libavutil.61.dylib
+    libswscale.10.dylib
+    libswresample.7.dylib
+    libavformat.63.dylib
+    libavfilter.12.dylib
+    libavdevice.63.dylib
+)
 
 if [ ! -x "$FREERDP_BIN" ]; then
     echo "error: sdl-freerdp not found at $FREERDP_BIN" >&2
@@ -54,9 +64,26 @@ install_name_tool \
     -add_rpath @executable_path/../Frameworks \
     "$APP/Contents/MacOS/sdl-freerdp"
 
+echo "==> Bundling LGPL FFmpeg"
+for lib in "${FFMPEG_LIBS[@]}"; do
+    cp -L "$FFMPEG_DIR/$lib" "$APP/Contents/Frameworks/$lib"
+    chmod u+w "$APP/Contents/Frameworks/$lib"
+    install_name_tool -id "@rpath/$lib" "$APP/Contents/Frameworks/$lib"
+    for dep in "${FFMPEG_LIBS[@]}"; do
+        install_name_tool -change "$FFMPEG_DIR/$dep" "@rpath/$dep" \
+            "$APP/Contents/Frameworks/$lib" 2>/dev/null || true
+    done
+    install_name_tool -add_rpath @loader_path "$APP/Contents/Frameworks/$lib" 2>/dev/null || true
+    install_name_tool -change "$FFMPEG_DIR/$lib" "@rpath/$lib" \
+        "$APP/Contents/MacOS/sdl-freerdp" 2>/dev/null || true
+done
+
 echo "==> Signing"
 codesign --force --sign - "$APP/Contents/Frameworks/libcrypto.3.dylib"
 codesign --force --sign - "$APP/Contents/Frameworks/libssl.3.dylib"
+for lib in "${FFMPEG_LIBS[@]}"; do
+    codesign --force --sign - "$APP/Contents/Frameworks/$lib"
+done
 codesign --force --sign - "$APP/Contents/MacOS/sdl-freerdp"
 codesign --force --sign - "$APP/Contents/MacOS/LanRDP"
 codesign --force --sign - "$APP"

@@ -79,6 +79,7 @@
 "用户名" = "Username";
 "域（可选）" = "Domain (optional)";
 "密码" = "Password";
+"远程密码" = "Remote password";
 "可留空，连接时询问" = "Optional; ask on connect";
 "留空则保留原密码" = "Leave blank to keep the current password";
 "用户名和域会随凭据共用；密码保存在 macOS 钥匙串。" = "Username and domain are shared with this credential; the password is stored in the macOS Keychain.";
@@ -178,6 +179,9 @@
 "保存密码到钥匙串（仅此电脑）" = "Save password in Keychain (this PC only)";
 "保存到钥匙串，供其他电脑共用" = "Save in Keychain and share with other PCs";
 "密码通过标准输入传给 sdl-freerdp，不会出现在进程参数或配置文件中。" = "The password is passed to sdl-freerdp via stdin and never appears in process arguments or config files.";
+"钥匙串里有保存的密码，但读取时需要 macOS 授权（App 更新后签名变化会这样）。直接输入远程密码即可，也可以从钥匙串读取。" = "A password is saved in the Keychain, but macOS needs your authorization to read it (this happens after the app is updated and re-signed). Enter the remote password directly, or read it from the Keychain.";
+"从钥匙串读取" = "Read from Keychain";
+"没有读到钥匙串里的密码，请直接输入远程密码。" = "Could not read the password from the Keychain. Please enter the remote password directly.";
 
 /* Errors */
 "未知错误" = "Unknown error";

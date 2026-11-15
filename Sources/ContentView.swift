@@ -81,7 +81,9 @@ struct ContentView: View {
                 pc: prompt.pc,
                 credential: prompt.credential,
                 username: prompt.username,
-                domain: prompt.domain
+                domain: prompt.domain,
+                keychainHasSavedPassword: store.hasKeychainPassword(for: prompt),
+                onReadKeychain: { store.readKeychainPassword(for: prompt) }
             ) { username, domain, password, save in
                 store.connect(
                     pc: prompt.pc,

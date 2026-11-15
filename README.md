@@ -6,6 +6,30 @@
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
 
+## 1.14.2 更新 / What's New
+
+### 中文
+
+- 修复“直接输入”凭据的电脑连接时弹出 macOS 钥匙串授权框的问题；现在会直接询问远程密码。
+- 连接时不再自动读取钥匙串：本地密码文件有密码就直接连接，没有就弹窗询问。
+- 弹窗会提示钥匙串里有保存的密码，并可点“从钥匙串读取”主动读取（这一步才可能要求系统授权）。
+- 密码弹窗的输入框有明确的“用户名”“域（可选）”“密码”标签。
+- 直接登录默认不勾选“保存密码到钥匙串”，不勾选时每次连接都询问密码。
+- 设置里“关于”显示实际版本号和 build 号。
+- 修复画质档传 `/bpp` 导致 GFX/H.264 被关闭的问题（任务管理器图表不刷新、视频卡顿撕裂）。
+- 修复视频播放时窗口假死（画面在动、有声音，但点不动、转菊花）：每次事件只画一帧，堆积的 damage 合并成一次呈现。
+
+### English
+
+- Fixed the macOS Keychain authorization panel appearing when connecting to a PC with “direct login” credentials; LanRDP now asks for the remote password instead.
+- Passwords are no longer read from the Keychain automatically while connecting: the local password file is used when present, otherwise LanRDP asks.
+- The prompt notes that a password is saved in the Keychain and offers “Read from Keychain” (the only path that may ask for system authorization).
+- The password sheet now labels “Username”, “Domain (optional)” and “Password” explicitly.
+- For direct logins, “Save password in Keychain” is unchecked by default; with it unchecked every connection asks again.
+- Settings → About shows the real version and build number.
+- Fixed quality presets passing `/bpp`, which disabled GFX and H.264 (Task Manager graphs frozen, video tearing).
+- Fixed the window hanging during video playback (picture and audio keep running, clicks stop working): one frame per event, queued damage merged into a single present.
+
 ## 1.14.1 更新 / What's New
 
 ### 中文
@@ -195,6 +219,9 @@ cd lanrdp
 - OpenSSL 3
 - SDL3 3.4.20（静态库）
 - SDL3_ttf 3.2.2（静态库，FreeType 2.15.0）
+- FFmpeg 9.0.2 —— **LGPL-only 构建**，用 `./scripts/ffmpeg-lgpl.sh arm64` 生成到
+  `.build/ffmpeg-lgpl/arm64`；FreeRDP 配置时需指定该前缀（`PKG_CONFIG_LIBDIR`）。
+  App 以动态库形式打包 `libavcodec/libavutil/libswscale/libswresample/libavformat/libavfilter/libavdevice`。
 
 当前 `.build` 中已经包含这些依赖和 FreeRDP 源码构建产物。
 
@@ -215,6 +242,9 @@ DMG 根目录只放 `LanRDP.app` 和 `Applications` 快捷方式，许可证和�
 
 - 直接登录：编辑这台 PC，点 **“清除此电脑保存的密码”**，下次连接会重新询问。
 - 共享凭据：编辑左侧“凭据”里的对应项，输入新密码保存。
+- 连接时提示“钥匙串里有保存的密码，但读取时需要 macOS 授权”：说明 App 更新后签名变了，
+  macOS 不再信任旧的钥匙串条目。直接输入远程密码即可（会保存到本地密码文件，下次直接连接），
+  也可以点 **“从钥匙串读取”** 主动授权读取。
 
 ## 证书变化 / 退出时报错
 
@@ -233,6 +263,7 @@ DMG 根目录只放 `LanRDP.app` 和 `Applications` 快捷方式，许可证和�
 - FreeRDP 3.33.0 — Apache License 2.0（已修改，见 `MODIFICATIONS.md` / `patches/`）
 - SDL3 3.4.20 / SDL3_ttf 3.2.2 — zlib License
 - OpenSSL 3.3.1 — Apache License 2.0
+- FFmpeg 9.0.2 — GNU LGPL v2.1 or later（LGPL-only 构建，动态库，未启用 GPL 组件）
 - FreeType 2.15.0 — FreeType License（FTL），另附 GPLv2 文本
 
 完整的许可证文本在 `Resources/Licenses/`，规则说明在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -1,0 +1,13 @@
+--- a/client/common/cmdline.c
++++ b/client/common/cmdline.c
+@@ -2225,7 +2225,9 @@
+ 				const int rc = parse_bpp_options(settings, p);
+ 				if (rc != 0)
+ 					return fail_at(p, rc);
+-				garg = TRUE;
++				/* LanRDP: /bpp only selects the colour depth. Treating it as an
++				 * explicit codec choice silently disabled the Graphics Pipeline,
++				 * H.264/AVC444 and RemoteFX defaults (LanRDP always passes /bpp). */
+ 			}
+ 			break;
+ 			default:

@@ -3,6 +3,52 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.2 — 2026-11-15
+
+### 中文
+
+- 修复使用“直接输入”凭据的电脑在连接时弹出 macOS 钥匙串授权框的问题。
+  现在连接时不再自动读取钥匙串：本地密码文件里有密码就直接连接，没有就询问远程密码。
+- 密码弹窗会提示“钥匙串里有保存的密码”，并可点“从钥匙串读取”主动读取（只有这一步会让
+  macOS 要求钥匙串授权），读完会记入本地密码文件，下次直接连接。
+- 密码弹窗的输入框现在有明确的“用户名”“域（可选）”“密码”标签，不再只有占位提示。
+- 直接登录默认**不**勾选“保存密码到钥匙串”；不勾选时每次连接都会重新询问
+  （以前密码会在本次运行内被记住，断开重连不再询问）。
+- 点“清除此电脑保存的密码”时，会一并清理旧版本留下的钥匙串条目。
+- 设置里的“关于”改为显示实际的版本号和 build 号，方便确认运行的是哪个测试包。
+- 修复画质档传入 `/bpp` 导致 FreeRDP 关闭图形管线（GFX）和 H.264/RemoteFX 的问题：
+  任务管理器图表不刷新、视频卡顿/撕裂都由它引起；现在各画质档都会启用 GFX + AVC444。
+- FFmpeg H.264 解码改为**自建的 LGPL-only 构建**（`--disable-gpl`，只含 h264 解码与 swscale），
+  以动态库随 App 分发；不再依赖 GPL 版 Homebrew FFmpeg。许可证与源码说明见 `THIRD_PARTY_NOTICES.md`。
+- 修复视频播放时窗口假死：画面还在动、声音正常，但点击无响应并出现转菊花。
+  原因是 SDL 客户端在同一事件里把积压帧一直画到队列为空，主线程回不到事件循环；
+  现在每次事件只画一帧，并把堆积的 damage 合并成一次呈现。
+
+### English
+
+- Fixed connecting to a PC with “direct login” credentials showing the macOS Keychain
+  authorization panel instead of asking for the remote password. The app no longer reads the
+  Keychain automatically while connecting: it uses the local password file when present and
+  otherwise asks for the remote password.
+- The password prompt now mentions that a password exists in the Keychain and offers an explicit
+  “Read from Keychain” action (the only path that may ask macOS for Keychain authorization).
+  Once read, the password is stored in the local file so later connections go straight through.
+- The prompt now labels the fields “Username”, “Domain (optional)” and “Password” instead of
+  relying on placeholder text only.
+- “Save password in Keychain” is now unchecked by default for direct logins; with it unchecked
+  every connection asks again (previously the password stayed cached for the whole app run).
+- “Clear saved password for this PC” now also removes keychain items left behind by older builds.
+- Settings → About now shows the real version and build number, so it is obvious which build runs.
+- Fixed the quality presets passing `/bpp`, which made FreeRDP skip the Graphics Pipeline,
+  H.264/AVC444 and RemoteFX defaults. That was the reason Task Manager graphs did not refresh and
+  video stuttered/tore. All presets now keep GFX + AVC444 enabled.
+- Bundled a self-built **LGPL-only FFmpeg** (no GPL components; H.264 decode + swscale only) as
+  dynamic libraries instead of linking the GPL Homebrew build. See `THIRD_PARTY_NOTICES.md`.
+- Fixed the window hanging during video playback (picture and audio keep running, but clicks stop
+  working and macOS shows the spinning beachball). The SDL client used to drain the whole damage
+  queue inside one event handler, so the main thread never returned to the event loop. It now
+  paints one frame per event and merges queued damage into a single present.
+
 ## 1.14.1 — 2026-11-13
 
 ### 中文

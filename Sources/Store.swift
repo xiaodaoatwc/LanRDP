@@ -162,12 +162,12 @@ final class Store: ObservableObject {
             passwordCache[credential.id] = fallback
             return fallback
         }
-        guard let password = Keychain.password(for: credential.id), !password.isEmpty else {
-            return nil
-        }
-        passwordVault.setPassword(password, for: credential.id)
-        passwordCache[credential.id] = password
-        return password
+        // Deliberately no keychain read here: after a rebuild the ad-hoc
+        // signature no longer matches the saved item and macOS would pop its
+        // "LanRDP wants to access …" panel in the middle of connecting. The
+        // connect flow asks for the remote password instead (the prompt can
+        // read the keychain explicitly if the user wants to).
+        return nil
     }
 
     func password(for pc: PC) -> String? {
@@ -178,23 +178,59 @@ final class Store: ObservableObject {
             passwordCache[pc.id] = fallback
             return fallback
         }
-        guard let password = Keychain.password(for: pc.id, service: Keychain.pcService),
-              !password.isEmpty else {
-            return nil
+        return nil
+    }
+
+    /// True when the keychain holds an entry for this PC that was not read
+    /// automatically. The connect prompt then offers an explicit
+    /// "read from keychain" action, which is the only path allowed to show the
+    /// macOS keychain authorization panel.
+    func hasKeychainPassword(for pc: PC) -> Bool {
+        if passwordCache[pc.id] != nil { return false }
+        if let fallback = passwordVault.password(for: pc.id), !fallback.isEmpty { return false }
+        return Keychain.hasItem(for: pc.id, service: Keychain.pcService)
+    }
+
+    func hasKeychainPassword(for credential: Credential) -> Bool {
+        if passwordCache[credential.id] != nil { return false }
+        if let fallback = passwordVault.password(for: credential.id), !fallback.isEmpty { return false }
+        return Keychain.hasItem(for: credential.id)
+    }
+
+    func hasKeychainPassword(for prompt: PasswordPrompt) -> Bool {
+        if let credential = prompt.credential {
+            return hasKeychainPassword(for: credential)
         }
-        passwordVault.setPassword(password, for: pc.id)
-        passwordCache[pc.id] = password
+        return hasKeychainPassword(for: prompt.pc)
+    }
+
+    /// Explicit, user initiated read: macOS may ask for the keychain password here.
+    func readKeychainPassword(for prompt: PasswordPrompt) -> String? {
+        let password: String?
+        let id: UUID
+        if let credential = prompt.credential {
+            id = credential.id
+            password = Keychain.password(for: credential.id)
+        } else {
+            id = prompt.pc.id
+            password = Keychain.password(for: prompt.pc.id, service: Keychain.pcService)
+        }
+        guard let password, !password.isEmpty else { return nil }
+        passwordVault.setPassword(password, for: id)
+        passwordCache[id] = password
         return password
     }
 
     func hasPassword(for credential: Credential) -> Bool {
-        guard let password = Keychain.password(for: credential.id) else { return false }
-        return !password.isEmpty
+        if passwordCache[credential.id] != nil { return true }
+        if let fallback = passwordVault.password(for: credential.id), !fallback.isEmpty { return true }
+        return Keychain.hasItem(for: credential.id)
     }
 
     func hasPassword(for pc: PC) -> Bool {
-        guard let password = Keychain.password(for: pc.id, service: Keychain.pcService) else { return false }
-        return !password.isEmpty
+        if passwordCache[pc.id] != nil { return true }
+        if let fallback = passwordVault.password(for: pc.id), !fallback.isEmpty { return true }
+        return Keychain.hasItem(for: pc.id, service: Keychain.pcService)
     }
 
     func usedCount(for credential: Credential) -> Int {
@@ -390,12 +426,9 @@ final class Store: ObservableObject {
         updated.domain = domain
         updatePC(updated)
 
-        if let credential {
-            passwordCache[credential.id] = password
-        } else {
-            passwordCache[updated.id] = password
-        }
-
+        // Only remember the password when the user asked for it. Otherwise the
+        // next connect must ask again (the cache used to keep it for the whole
+        // app run even with the box unchecked).
         if savePassword {
             if let credential {
                 setPassword(password, for: credential)

@@ -113,8 +113,9 @@ struct SettingsView: View {
                             .font(.system(size: 28))
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("LanRDP 1.14")
+                            Text("LanRDP \(appVersionText)")
                                 .font(.headline)
+                                .textSelection(.enabled)
                             Text("一个 RDP 的 macOS 小工具，可用于局域网或广域网。使用 FreeRDP 连接，不依赖 Microsoft 账号，也没有联网检查。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -131,6 +132,13 @@ struct SettingsView: View {
             .formStyle(.grouped)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var appVersionText: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let short = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (build \(build))"
     }
 
     private func openKeychainAccess() {

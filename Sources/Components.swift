@@ -59,13 +59,17 @@ struct PasswordPromptView: View {
 
     let pc: PC
     let credential: Credential?
+    let keychainHasSavedPassword: Bool
+    let onReadKeychain: (() -> String?)?
     let onConnect: (String, String, String, Bool) -> Void
     let onCancel: () -> Void
 
     @State private var username: String
     @State private var domain: String
     @State private var password = ""
-    @State private var savePassword = true
+    @State private var savePassword: Bool
+    @State private var showKeychainHint: Bool
+    @State private var keychainMessage: String?
     @FocusState private var usernameFocused: Bool
     @FocusState private var passwordFocused: Bool
 
@@ -74,15 +78,24 @@ struct PasswordPromptView: View {
         credential: Credential?,
         username: String,
         domain: String,
+        keychainHasSavedPassword: Bool = false,
+        onReadKeychain: (() -> String?)? = nil,
         onConnect: @escaping (String, String, String, Bool) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.pc = pc
         self.credential = credential
+        self.keychainHasSavedPassword = keychainHasSavedPassword
+        self.onReadKeychain = onReadKeychain
         self.onConnect = onConnect
         self.onCancel = onCancel
         _username = State(initialValue: username)
         _domain = State(initialValue: domain)
+        _showKeychainHint = State(initialValue: keychainHasSavedPassword)
+        // Direct logins should not quietly store the password: every connect
+        // asks again unless the user ticks the box. Shared credentials are
+        // managed centrally, so remembering their password stays the default.
+        _savePassword = State(initialValue: credential != nil)
     }
 
     private var isDirect: Bool { credential == nil }
@@ -116,24 +129,49 @@ struct PasswordPromptView: View {
             }
 
             if isDirect {
-                TextField("用户名", text: $username, prompt: Text("Windows 用户名"))
-                    .textFieldStyle(.roundedBorder)
-                    .focused($usernameFocused)
-                    .onSubmit { passwordFocused = true }
+                LabeledContent(L10n.t("用户名")) {
+                    TextField("Windows 用户名", text: $username)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($usernameFocused)
+                        .onSubmit { passwordFocused = true }
+                }
 
-                TextField("域（可选）", text: $domain, prompt: Text("例如 DESKTOP-ABC"))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent(L10n.t("域（可选）")) {
+                    TextField("例如 DESKTOP-ABC", text: $domain)
+                        .textFieldStyle(.roundedBorder)
+                }
             }
 
-            SecureField("密码", text: $password)
-                .textFieldStyle(.roundedBorder)
-                .focused($passwordFocused)
-                .onSubmit(connect)
+            LabeledContent(L10n.t("密码")) {
+                SecureField("远程密码", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($passwordFocused)
+                    .onSubmit(connect)
+            }
 
             Toggle(
                 LocalizedStringKey(isDirect ? "保存密码到钥匙串（仅此电脑）" : "保存到钥匙串，供其他电脑共用"),
                 isOn: $savePassword
             )
+
+            if showKeychainHint {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.t("钥匙串里有保存的密码，但读取时需要 macOS 授权（App 更新后签名变化会这样）。直接输入远程密码即可，也可以从钥匙串读取。"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(L10n.t("从钥匙串读取")) {
+                        readFromKeychain()
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            if let keychainMessage {
+                Text(keychainMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
 
             Text("密码通过标准输入传给 sdl-freerdp，不会出现在进程参数或配置文件中。")
                 .font(.caption)
@@ -164,6 +202,19 @@ struct PasswordPromptView: View {
                 passwordFocused = true
             }
         }
+    }
+
+    /// Explicit read: this is the only path that may show the macOS keychain
+    /// authorization panel, and only because the user asked for it.
+    private func readFromKeychain() {
+        guard let saved = onReadKeychain?(), !saved.isEmpty else {
+            keychainMessage = L10n.t("没有读到钥匙串里的密码，请直接输入远程密码。")
+            return
+        }
+        password = saved
+        keychainMessage = nil
+        showKeychainHint = false
+        passwordFocused = true
     }
 
     private func connect() {

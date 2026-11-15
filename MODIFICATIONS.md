@@ -63,6 +63,22 @@ LanRDP 分发的 `sdl-freerdp` 基于 FreeRDP 3.33.0，包含以下本地修改�
   （它们同时包含左右两侧的位，真实按键永远匹配不上）；必须写左右具体的 `KMOD_LCTRL`、
   `KMOD_LALT`。因此右 Ctrl / 右 Alt 不会触发快捷键，会正常发送到远程桌面。
 
+## 9. `client/SDL/SDL3/sdl_freerdp.cpp`（视频播放时窗口卡死）
+
+- **修改**：`SDL_EVENT_USER_UPDATE` 每次事件只绘制一帧；如果同一事件期间已经堆积了更多
+  damage，就把它们合并成一个外接矩形一次画完。
+- **原因**：原来的实现用 `do { pop(); draw(); } while (!empty)` 把队列画空。服务器持续发帧
+  （视频播放）时，主线程长期停在这个事件处理里，SDL 的鼠标/窗口事件得不到分发：远程画面还在动，
+  但点击无效而且出现转菊花。改成“一事件一帧”后主线程能回到事件循环处理输入。
+
+## 10. `client/common/cmdline.c`（`/bpp` 不应关闭图形管线）
+
+- **修改**：`prepare_default_settings` 里解析 `/bpp` 时不再把 `garg` 置为 TRUE。
+- **原因**：一旦命令行出现 `/gfx`、`/rfx` 或 `/bpp`，FreeRDP 就跳过“自动启用图形管线、
+  H.264/AVC444 和 RemoteFX”的默认逻辑。LanRDP 的画质档总会传 `/bpp`，于是 **GFX 和 H.264
+  被静默关掉**：服务器只能退回位图/Progressive，表现为任务管理器图表不刷新、视频卡顿撕裂；
+  即使构建里带了 FFmpeg H.264 也用不到。`/bpp` 只是色深选项，不应算作“显式选择了编解码器”。
+
 补丁文件位于 `patches/`，可在 FreeRDP 源码根目录执行：
 
 ```bash
@@ -74,6 +90,8 @@ patch -p1 < patches/0005-sdl-window-usable-bounds.patch
 patch -p1 < patches/0006-sdl-disp-native-fullscreen-exit.patch
 patch -p1 < patches/0007-sdl-window-fullscreen-only.patch
 patch -p1 < patches/0008-sdl-input-hotkey-modifier.patch
+patch -p1 < patches/0009-sdl-bounded-frame-draw.patch
+patch -p1 < patches/0010-bpp-keeps-gfx-defaults.patch
 ```
 
-修改日期：2026-11-08，2026-11-13 增补第 8 项。
+修改日期：2026-11-08，2026-11-13 增补第 8 项，2026-11-15 增补第 9、10 项。

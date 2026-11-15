@@ -1,0 +1,82 @@
+--- a/client/SDL/SDL3/sdl_context.hpp
++++ b/client/SDL/SDL3/sdl_context.hpp
+@@ -98,6 +98,7 @@
+ 
+ 	void push(std::vector<SDL_Rect>&& rects);
+ 	[[nodiscard]] std::vector<SDL_Rect> pop();
++	[[nodiscard]] bool hasPendingUpdates();
+ 
+ 	void setHasCursor(bool val);
+ 	[[nodiscard]] bool hasCursor() const;
+--- a/client/SDL/SDL3/sdl_context.cpp
++++ b/client/SDL/SDL3/sdl_context.cpp
+@@ -2061,6 +2061,11 @@
+ 	return val;
+ }
+ 
++bool SdlContext::hasPendingUpdates()
++{
++	std::unique_lock lock(_queue_mux);
++	return !_queue.empty();
++}
+ 
+ bool SdlContext::setFullscreen(bool enter, bool forceOriginalDisplay)
+ {
+--- a/client/SDL/SDL3/sdl_freerdp.cpp
++++ b/client/SDL/SDL3/sdl_freerdp.cpp
+@@ -236,13 +236,49 @@
+ 					break;
+ 					case SDL_EVENT_USER_UPDATE:
+ 					{
+-						std::vector<SDL_Rect> rectangles;
+-						do
++						/* Paint at most one frame per event. Draining the whole queue in
++						 * this handler keeps the main thread here for as long as the
++						 * server keeps sending damage (video playback): window and input
++						 * events are never dispatched, so the picture keeps moving while
++						 * clicks stop working and macOS shows the spinning beachball.
++						 * If damage piled up for the same event, merge it into one
++						 * bounding box so the newest framebuffer content is presented
++						 * once instead of falling further behind. */
++						auto rectangles = sdl->pop();
++						if (sdl->hasPendingUpdates())
+ 						{
+-							rectangles = sdl->pop();
+-							if (!sdl->drawToWindows(rectangles))
+-								throw ErrorMsg{ -1, windowEvent.type, "sdl->drawToWindows" };
+-						} while (!rectangles.empty());
++							SDL_Rect box = { 0, 0, 0, 0 };
++							bool haveBox = false;
++							auto merge = [&box, &haveBox](const SDL_Rect& r) {
++								if (!haveBox)
++								{
++									box = r;
++									haveBox = true;
++									return;
++								}
++								const int x2 = (box.x + box.w > r.x + r.w) ? box.x + box.w : r.x + r.w;
++								const int y2 = (box.y + box.h > r.y + r.h) ? box.y + box.h : r.y + r.h;
++								const int x1 = (box.x < r.x) ? box.x : r.x;
++								const int y1 = (box.y < r.y) ? box.y : r.y;
++								box.x = x1;
++								box.y = y1;
++								box.w = x2 - x1;
++								box.h = y2 - y1;
++							};
++							for (const auto& r : rectangles)
++								merge(r);
++							while (sdl->hasPendingUpdates())
++							{
++								auto more = sdl->pop();
++								for (const auto& r : more)
++									merge(r);
++							}
++							rectangles.clear();
++							if (haveBox)
++								rectangles.push_back(box);
++						}
++						if (!sdl->drawToWindows(rectangles))
++							throw ErrorMsg{ -1, windowEvent.type, "sdl->drawToWindows" };
+ 					}
+ 					break;
+ 					case SDL_EVENT_USER_CREATE_WINDOWS:
