@@ -258,6 +258,17 @@ DMG 根目录只放 `LanRDP.app` 和 `Applications` 快捷方式，许可证和�
 - FreeRDP 的显示缩放取决于 Windows 版本和桌面会话，200% 不保证所有应用都完美。
 - 默认“忽略证书错误”不会弹出证书信任提示；如果启用“首次信任”，证书变化时可能拒绝连接，可在 PC 设置里改回忽略或清除证书缓存。
 
+## 解码器与专利说明
+
+LanRDP **不随包分发任何 H.264 解码实现**：
+
+- macOS：H.264 由系统 **VideoToolbox** 解码；
+- HarmonyOS：H.264 由系统 **AVCodec**（硬件解码）解码；
+- 随 App 分发的 FFmpeg 只保留 **swscale/swresample**（图像缩放/重采样），不含 H.264 编解码器；
+- H.264 专利许可由操作系统厂商承担；LanRDP 自身只调用系统接口。
+
+如果设备没有可用的系统 H.264 解码器，客户端会退回位图/Progressive 编码，不会尝试软件解码。
+
 ## 第三方组件与许可证
 
 - FreeRDP 3.33.0 — Apache License 2.0（已修改，见 `MODIFICATIONS.md` / `patches/`）

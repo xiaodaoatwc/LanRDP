@@ -53,7 +53,10 @@ App 包内包含以下第三方组件：
 ### GNU LGPL v2.1 or later（FFmpeg）
 
 - App 内自带的是**自建的 LGPL-only FFmpeg**：`--disable-gpl --disable-nonfree`，
-  只启用 H.264 解码、parser 和 swscale/swresample，未链接 x264/x265 等 GPL 组件。
+  **不包含 H.264 编解码器**（`--disable-decoder=h264 --disable-parser=h264`），
+  只保留 swscale/swresample 用于图像缩放；未链接 x264/x265 等 GPL 组件。
+- **H.264 解码完全由操作系统提供**：macOS 使用系统 VideoToolbox，HarmonyOS 使用系统 AVCodec。
+  LanRDP 不随包分发任何 H.264 解码实现，相关专利许可由系统厂商承担。
 - FFmpeg 以**动态库**形式随 App 分发（`Contents/Frameworks/libav*.dylib`），
   用户可以替换这些库文件；LanRDP 自身代码仍为 MIT，不因链接 LGPL 库而改变许可证。
 - 随 App 提供 LGPL 全文与 FFmpeg 版权声明。

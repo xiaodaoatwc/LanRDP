@@ -3,6 +3,24 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.3 — 2026-11-15
+
+### 中文
+
+- H.264 解码改为**完全由操作系统提供**（macOS：VideoToolbox），App **不再随包分发任何 H.264 解码实现**：
+  FreeRDP 关闭 `WITH_VIDEO_FFMPEG`，随包的 FFmpeg 去掉 H.264 解码器/parser，只保留 swscale。
+- 音频改用 FreeRDP 内置解码（关闭 `WITH_DSP_FFMPEG`），不再依赖 FFmpeg 音频路径。
+- 许可证说明更新：H.264 专利许可由系统厂商承担，LanRDP 只调用系统接口。
+
+### English
+
+- H.264 decoding is now provided **only by the operating system** (VideoToolbox on macOS); the app no
+  longer ships any H.264 decoding implementation. FreeRDP is built with `WITH_VIDEO_FFMPEG=OFF`, and
+  the bundled FFmpeg drops the H.264 decoder/parser and keeps only swscale.
+- Audio uses FreeRDP's built-in decoders (`WITH_DSP_FFMPEG=OFF`) instead of the FFmpeg audio path.
+- Updated the license notes: H.264 patent licensing is covered by the OS vendor; LanRDP only calls
+  the system interfaces.
+
 ## 1.14.2 — 2026-11-15
 
 ### 中文
