@@ -78,3 +78,11 @@ Do not commit generated `.p12`, `.cer`, `.p7b`, or `.csr` files; they are ignore
 2. Add a framebuffer callback and an ArkUI XComponent renderer.
 3. Add input, clipboard, display resize, and certificate handling.
 4. Add OpenSSL/FreeRDP license notices to the HAP.
+
+## Render & codec notes
+
+See [NOTES.md](NOTES.md) for:
+
+- macOS-validated findings that matter here (GFX/H.264 must be enabled explicitly; frame-drain starvation; decoder licensing);
+- current OHOS frame pipeline and lock-scope issues (with `napi_init.cpp` line references);
+- the planned native AVCodec (H.264 4:2:0) implementation, phase-by-phase rollback plan and test checklist.

@@ -4,6 +4,19 @@
 #include <freerdp/settings.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
+#include <freerdp/client/cmdline.h>
+#include <freerdp/client/channels.h>
+#include <freerdp/channels/channels.h>
+#include <freerdp/addin.h>
+#include <freerdp/client.h>
+#include <freerdp/channels/rdpgfx.h>
+#include <freerdp/gdi/gfx.h>
+
+extern "C" int pthread_cancel(pthread_t thread)
+{
+    (void)thread;
+    return 0;
+}
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
@@ -12,6 +25,7 @@
 #include "multimedia/image_framework/image_pixel_map_mdk.h"
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
+
 
 #include <algorithm>
 #include <atomic>
@@ -346,6 +360,16 @@ static void DestroySession(Session* session)
     delete session;
 }
 
+static void SessionChannelConnected(void* context, const ChannelConnectedEventArgs* e)
+{
+    auto* ctx = static_cast<rdpContext*>(context);
+    if (!ctx || !e || !e->name || !e->pInterface)
+        return;
+    if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) != 0)
+        return;
+    (void)gdi_graphics_pipeline_init(ctx->gdi, static_cast<RdpgfxClientContext*>(e->pInterface));
+}
+
 static BOOL SessionPostConnect(freerdp* instance)
 {
     if (!instance || !instance->context)
@@ -440,6 +464,12 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
         return false;
     }
 
+    instance->LoadChannels = freerdp_client_load_channels;
+    if (PubSub_SubscribeChannelConnected(instance->context->pubSub, SessionChannelConnected) < 0) {
+        error = "PubSub_SubscribeChannelConnected failed";
+        SetSessionState(session, SESSION_FAILED, error);
+        return false;
+    }
     auto* sessionContext = reinterpret_cast<SessionContext*>(instance->context);
     sessionContext->session = session;
     session->instance = instance;
@@ -454,6 +484,12 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
         freerdp_settings_set_string(settings, FreeRDP_Domain, domain.c_str());
     freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
+
+    /* Graphics pipeline + H.264 via the bundled LGPL FFmpeg decoder. */
+    freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxH264, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444v2, TRUE);
     freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000);
     const uint32_t width = (desktopWidth >= 640 && desktopWidth <= 4096) ? desktopWidth : 1024;
     const uint32_t height = (desktopHeight >= 480 && desktopHeight <= 4096) ? desktopHeight : 768;
@@ -464,6 +500,12 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
     if (deviceScale == 100 || deviceScale == 140 || deviceScale == 180)
         freerdp_settings_set_uint32(settings, FreeRDP_DeviceScaleFactor, deviceScale);
 
+    freerdp_settings_set_bool(settings, FreeRDP_SupportDynamicChannels, TRUE);
+    if (freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0) != 0) {
+        error = "freerdp_register_addin_provider failed";
+        SetSessionState(session, SESSION_FAILED, error);
+        return false;
+    }
     instance->PostConnect = SessionPostConnect;
 
     if (!freerdp_connect(instance)) {
