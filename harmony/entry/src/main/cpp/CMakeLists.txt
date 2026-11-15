@@ -32,6 +32,7 @@ target_link_libraries(lanrdp PUBLIC
     libnative_window.so
     libEGL.so
     libGLESv3.so
+    libhilog_ndk.z.so
     -Wl,--start-group
     ${FREERDP_PREFIX}/lib/libfreerdp3.a
     ${FREERDP_PREFIX}/lib/libwinpr3.a

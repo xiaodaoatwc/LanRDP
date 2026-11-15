@@ -8,6 +8,7 @@
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include <native_window/external_window.h>
+#include <hilog/log.h>
 #include "multimedia/image_framework/image_pixel_map_mdk.h"
 #include <freerdp/codec/color.h>
 #include <winpr/synch.h>
@@ -993,6 +994,7 @@ struct XTestRenderer {
     GLuint program = 0;
     GLuint texture = 0;
     GLuint vbo = 0;
+    GLuint vao = 0;
     GLint textureUniform = -1;
     int textureWidth = 0;
     int textureHeight = 0;
@@ -1087,6 +1089,7 @@ struct XTestRenderer {
                             GL_RGBA, GL_UNSIGNED_BYTE, data);
         }
         textureVersion = version;
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX", "texture %{public}dx%{public}d", frameWidth, frameHeight);
     }
 
     void RenderLoop(void* window)
@@ -1128,6 +1131,7 @@ struct XTestRenderer {
         eglSwapInterval(display, 1);
         program = CreateProgram();
         if (!program) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, 0xFF00, "LanRDPX", "shader program failed");
             eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             eglDestroyContext(display, context);
             eglDestroySurface(display, surface);
@@ -1135,9 +1139,12 @@ struct XTestRenderer {
             return;
         }
         textureUniform = glGetUniformLocation(program, "uTexture");
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
         glGenBuffers(1, &vbo);
         glUseProgram(program);
         glUniform1i(textureUniform, 0);
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX", "renderer ready");
 
         while (running.load()) {
             const int w = width.load();
@@ -1190,6 +1197,7 @@ struct XTestRenderer {
                 glUseProgram(program);
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, texture);
+                glBindVertexArray(vao);
                 glBindBuffer(GL_ARRAY_BUFFER, vbo);
                 glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
                 glEnableVertexAttribArray(0);
@@ -1208,6 +1216,7 @@ struct XTestRenderer {
         }
 
         if (vbo) glDeleteBuffers(1, &vbo);
+        if (vao) glDeleteVertexArrays(1, &vao);
         if (texture) glDeleteTextures(1, &texture);
         if (program) glDeleteProgram(program);
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
