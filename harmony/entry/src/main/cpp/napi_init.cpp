@@ -1243,6 +1243,15 @@ static void OnXSurfaceCreated(OH_NativeXComponent* component, void* window)
         OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
         g_xTestRenderer.SetSize(static_cast<int>(width), static_cast<int>(height));
         g_xComponentActive.store(true);
+        {
+            std::lock_guard<std::mutex> sessionLock(g_sessionMutex);
+            Session* session = g_session;
+            if (session) {
+                std::lock_guard<std::mutex> frameLock(session->mutex);
+                session->pendingNativeFrame = true;
+                session->hasNativeFrameTime = false;
+            }
+        }
         g_xTestRenderer.Start(window);
     }
 }
