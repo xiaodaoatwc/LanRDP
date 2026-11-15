@@ -980,6 +980,10 @@ static GLuint CompileShader(GLenum type, const char* source)
     GLint compiled = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
+        char info[512] = {0};
+        GLsizei length = 0;
+        glGetShaderInfoLog(shader, sizeof(info) - 1, &length, info);
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xFF00, "LanRDPX", "shader: %{public}s", info);
         glDeleteShader(shader);
         return 0;
     }
@@ -1025,27 +1029,22 @@ struct XTestRenderer {
 
     GLuint CreateProgram()
     {
-        static const char* vertexSource = R"(
-            #version 300 es
-            layout(location = 0) in vec2 aPos;
-            layout(location = 1) in vec2 aTex;
-            out vec2 vTex;
-            void main() {
-                vTex = aTex;
-                gl_Position = vec4(aPos, 0.0, 1.0);
-            }
-        )";
-        static const char* fragmentSource = R"(
-            #version 300 es
-            precision mediump float;
-            in vec2 vTex;
-            uniform sampler2D uTexture;
-            out vec4 fragColor;
-            void main() {
-                vec4 color = texture(uTexture, vTex);
-                fragColor = vec4(color.b, color.g, color.r, color.a);
-            }
-        )";
+        static const char* vertexSource =
+            "attribute vec2 aPos;\n"
+            "attribute vec2 aTex;\n"
+            "varying vec2 vTex;\n"
+            "void main() {\n"
+            "  vTex = aTex;\n"
+            "  gl_Position = vec4(aPos, 0.0, 1.0);\n"
+            "}\n";
+        static const char* fragmentSource =
+            "precision mediump float;\n"
+            "varying vec2 vTex;\n"
+            "uniform sampler2D uTexture;\n"
+            "void main() {\n"
+            "  vec4 color = texture2D(uTexture, vTex);\n"
+            "  gl_FragColor = vec4(color.b, color.g, color.r, color.a);\n"
+            "}\n";
         GLuint vs = CompileShader(GL_VERTEX_SHADER, vertexSource);
         GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fragmentSource);
         if (!vs || !fs) {
@@ -1056,12 +1055,18 @@ struct XTestRenderer {
         GLuint prog = glCreateProgram();
         glAttachShader(prog, vs);
         glAttachShader(prog, fs);
+        glBindAttribLocation(prog, 0, "aPos");
+        glBindAttribLocation(prog, 1, "aTex");
         glLinkProgram(prog);
         glDeleteShader(vs);
         glDeleteShader(fs);
         GLint linked = 0;
         glGetProgramiv(prog, GL_LINK_STATUS, &linked);
         if (!linked) {
+            char info[512] = {0};
+            GLsizei length = 0;
+            glGetProgramInfoLog(prog, sizeof(info) - 1, &length, info);
+            OH_LOG_Print(LOG_APP, LOG_ERROR, 0xFF00, "LanRDPX", "program: %{public}s", info);
             glDeleteProgram(prog);
             return 0;
         }
@@ -1129,6 +1134,8 @@ struct XTestRenderer {
             return;
         }
         eglSwapInterval(display, 1);
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX", "GL=%{public}s",
+            reinterpret_cast<const char*>(glGetString(GL_VERSION)));
         program = CreateProgram();
         if (!program) {
             OH_LOG_Print(LOG_APP, LOG_ERROR, 0xFF00, "LanRDPX", "shader program failed");
