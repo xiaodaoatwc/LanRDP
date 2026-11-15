@@ -216,8 +216,9 @@ static void FlushNativeFrame(Session* session)
         return;
     }
     const auto now = std::chrono::steady_clock::now();
+    const int frameIntervalMs = g_xComponentActive.load() ? 16 : 8;
     if (session->hasNativeFrameTime &&
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - session->lastNativeFrameTime).count() < 8) {
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - session->lastNativeFrameTime).count() < frameIntervalMs) {
         return;
     }
     SessionContext* sessionContext = reinterpret_cast<SessionContext*>(session->context);
@@ -1109,15 +1110,8 @@ struct XTestRenderer {
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, frameWidth, frameHeight,
                             GL_RGBA, GL_UNSIGNED_BYTE, data);
         }
-        uint32_t sample = 0;
-        if (data && frameWidth > 0 && frameHeight > 0) {
-            const size_t sampleOffset = (static_cast<size_t>(frameHeight / 2) * frameWidth + frameWidth / 2) * 4;
-            std::memcpy(&sample, data + sampleOffset, sizeof(sample));
-        }
         textureVersion = version;
         g_xUploadedFrames.fetch_add(1);
-        OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX",
-            "texture %{public}dx%{public}d sample=%{public}08x", frameWidth, frameHeight, sample);
     }
 
     void RenderLoop(void* window)

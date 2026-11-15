@@ -3169,6 +3169,7 @@ struct Index {
                 .width('100%')
                 .height('100%')
                 .backgroundColor('#F2F2F7')
+                .hitTestBehavior(HitTestMode.None)
                 .onLoad(() => {
                   this.notifyXViewTransform();
                   setTimeout(() => {
