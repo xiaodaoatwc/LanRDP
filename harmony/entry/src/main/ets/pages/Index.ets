@@ -3008,6 +3008,9 @@ struct Index {
               this.lastXFpsAt = 0;
               this.lastXFrameCount = 0;
               this.notifyXViewTransform();
+              setTimeout(() => {
+                forceXFrame();
+              }, 80);
             })
           Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
             .fontSize(12)
@@ -3116,9 +3119,12 @@ struct Index {
               .fontSize(11)
               .onClick(() => {
                 this.showXTest = !this.showXTest;
-              this.lastXFpsAt = 0;
-              this.lastXFrameCount = 0;
-              this.notifyXViewTransform();
+                this.lastXFpsAt = 0;
+                this.lastXFrameCount = 0;
+                this.notifyXViewTransform();
+                setTimeout(() => {
+                  forceXFrame();
+                }, 80);
               })
             Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
               .fontSize(12)

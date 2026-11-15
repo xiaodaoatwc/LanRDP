@@ -1246,7 +1246,6 @@ struct XTestRenderer {
                 break;
             }
             g_xRenderedFrames.fetch_add(1);
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
 
         if (vbo) glDeleteBuffers(1, &vbo);
