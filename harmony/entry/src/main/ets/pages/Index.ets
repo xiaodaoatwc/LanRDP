@@ -5,7 +5,7 @@ import { displaySync } from '@kit.ArkGraphics2D';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { ackFrame, bindFrameMaps, connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
+import { ackFrame, bindFrameMaps, connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, setXViewTransform, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -1142,6 +1142,9 @@ struct Index {
   }
 
   private async refreshFrame(): Promise<void> {
+    if (this.showXTest) {
+      return;
+    }
     if (this.isConnecting || this.frameBusy) {
       return;
     }
@@ -1378,6 +1381,7 @@ struct Index {
           this.viewOffsetX += deltaX;
           this.viewOffsetY += deltaY;
           this.clampViewOffsets();
+          this.notifyXViewTransform();
         }
         this.panLastX = touchX;
         this.panLastY = touchY;
@@ -1521,6 +1525,10 @@ struct Index {
 
   private displayImageHeight(): number {
     return this.frameHeight * this.baseDisplayScale() * this.viewScale;
+  }
+
+  private notifyXViewTransform(): void {
+    setXViewTransform(this.viewScale, this.viewOffsetX, this.viewOffsetY);
   }
 
   private clampViewOffsets(): void {
@@ -2974,12 +2982,14 @@ struct Index {
               this.viewScale = 1;
               this.viewOffsetX = 0;
               this.viewOffsetY = 0;
+              this.notifyXViewTransform();
             })
           Button(this.showXTest ? '关X' : 'X测试')
             .fontSize(12)
             .layoutWeight(1)
             .onClick(() => {
               this.showXTest = !this.showXTest;
+              this.notifyXViewTransform();
             })
           Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
             .fontSize(12)
@@ -3082,11 +3092,13 @@ struct Index {
                 this.viewScale = 1;
                 this.viewOffsetX = 0;
                 this.viewOffsetY = 0;
+                this.notifyXViewTransform();
               })
             Button('X测试')
               .fontSize(11)
               .onClick(() => {
                 this.showXTest = !this.showXTest;
+              this.notifyXViewTransform();
               })
             Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
               .fontSize(12)
@@ -3141,6 +3153,7 @@ struct Index {
               this.imageGlobalX = Number(newValue.globalPosition.x);
               this.imageGlobalY = Number(newValue.globalPosition.y);
               this.clampViewOffsets();
+              this.notifyXViewTransform();
             })
             .onTouch((event: TouchEvent) => {
               this.handleTouch(event);
@@ -3229,6 +3242,7 @@ struct Index {
                         (this.pinchFocalY - centerY) * (1 - ratio);
                       this.viewScale = newScale;
                       this.clampViewOffsets();
+                      this.notifyXViewTransform();
                     }
                   })
                   .onActionEnd(() => {

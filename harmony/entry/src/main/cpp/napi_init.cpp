@@ -117,6 +117,7 @@ static Session* SessionFromContext(rdpContext* context)
 }
 
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
+static std::atomic<bool> g_xComponentActive{ false };
 
 static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
 {
@@ -187,7 +188,7 @@ static BOOL SessionEndPaint(rdpContext* context)
     std::lock_guard<std::mutex> lock(session->mutex);
     session->width = width;
     session->height = height;
-    if (session->nativeBound) {
+    if (g_xComponentActive.load() || session->nativeBound) {
         session->pendingNativeFrame = true;
         return TRUE;
     }
@@ -227,6 +228,23 @@ static void FlushNativeFrame(Session* session)
     const UINT32 stride = gdi->stride;
     const UINT32 format = gdi->dstFormat;
     if (session->width != width || session->height != height || stride < static_cast<UINT32>(width * 4)) {
+        return;
+    }
+    if (g_xComponentActive.load()) {
+        const auto writeStart = std::chrono::steady_clock::now();
+        session->pixels.resize(static_cast<size_t>(width) * height * 4);
+        const BOOL copied = freerdp_image_copy(
+            session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
+            0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+            gdi->primary_buffer, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+        const auto writeEnd = std::chrono::steady_clock::now();
+        session->nativeWriteMs = std::chrono::duration<double, std::milli>(writeEnd - writeStart).count();
+        if (copied) {
+            session->pendingNativeFrame = false;
+            session->hasNativeFrameTime = true;
+            session->lastNativeFrameTime = writeEnd;
+            ++session->version;
+        }
         return;
     }
     int targetIndex = -1;
@@ -949,11 +967,36 @@ static napi_value SendMouseMove(napi_env env, napi_callback_info info)
     return result;
 }
 
+static std::atomic<float> g_xViewScale{ 1.0f };
+static std::atomic<float> g_xOffsetX{ 0.0f };
+static std::atomic<float> g_xOffsetY{ 0.0f };
+
+static GLuint CompileShader(GLenum type, const char* source)
+{
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint compiled = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        glDeleteShader(shader);
+        return 0;
+    }
+    return shader;
+}
+
 struct XTestRenderer {
     std::atomic<bool> running{ false };
     std::atomic<int> width{ 1280 };
     std::atomic<int> height{ 800 };
     std::thread thread;
+    GLuint program = 0;
+    GLuint texture = 0;
+    GLuint vbo = 0;
+    GLint textureUniform = -1;
+    int textureWidth = 0;
+    int textureHeight = 0;
+    uint64_t textureVersion = 0;
 
     void Start(void* window)
     {
@@ -978,15 +1021,79 @@ struct XTestRenderer {
         }
     }
 
+    GLuint CreateProgram()
+    {
+        static const char* vertexSource = R"(
+            #version 300 es
+            layout(location = 0) in vec2 aPos;
+            layout(location = 1) in vec2 aTex;
+            out vec2 vTex;
+            void main() {
+                vTex = aTex;
+                gl_Position = vec4(aPos, 0.0, 1.0);
+            }
+        )";
+        static const char* fragmentSource = R"(
+            #version 300 es
+            precision mediump float;
+            in vec2 vTex;
+            uniform sampler2D uTexture;
+            out vec4 fragColor;
+            void main() {
+                vec4 color = texture(uTexture, vTex);
+                fragColor = vec4(color.b, color.g, color.r, color.a);
+            }
+        )";
+        GLuint vs = CompileShader(GL_VERTEX_SHADER, vertexSource);
+        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fragmentSource);
+        if (!vs || !fs) {
+            if (vs) glDeleteShader(vs);
+            if (fs) glDeleteShader(fs);
+            return 0;
+        }
+        GLuint prog = glCreateProgram();
+        glAttachShader(prog, vs);
+        glAttachShader(prog, fs);
+        glLinkProgram(prog);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        GLint linked = 0;
+        glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+        if (!linked) {
+            glDeleteProgram(prog);
+            return 0;
+        }
+        return prog;
+    }
+
+    void UploadTexture(const uint8_t* data, int frameWidth, int frameHeight, uint64_t version)
+    {
+        if (!texture) {
+            glGenTextures(1, &texture);
+        }
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        if (frameWidth != textureWidth || frameHeight != textureHeight) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, frameWidth, frameHeight, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, data);
+            textureWidth = frameWidth;
+            textureHeight = frameHeight;
+        } else {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, frameWidth, frameHeight,
+                            GL_RGBA, GL_UNSIGNED_BYTE, data);
+        }
+        textureVersion = version;
+    }
+
     void RenderLoop(void* window)
     {
         EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-        if (display == EGL_NO_DISPLAY) {
-            return;
-        }
-        if (!eglInitialize(display, nullptr, nullptr)) {
-            return;
-        }
+        if (display == EGL_NO_DISPLAY) return;
+        if (!eglInitialize(display, nullptr, nullptr)) return;
         const EGLint configAttribs[] = {
             EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
@@ -1019,29 +1126,90 @@ struct XTestRenderer {
             return;
         }
         eglSwapInterval(display, 1);
-        const auto start = std::chrono::steady_clock::now();
+        program = CreateProgram();
+        if (!program) {
+            eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            eglDestroyContext(display, context);
+            eglDestroySurface(display, surface);
+            eglTerminate(display);
+            return;
+        }
+        textureUniform = glGetUniformLocation(program, "uTexture");
+        glGenBuffers(1, &vbo);
+        glUseProgram(program);
+        glUniform1i(textureUniform, 0);
+
         while (running.load()) {
             const int w = width.load();
             const int h = height.load();
+            if (w <= 0 || h <= 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                continue;
+            }
+            int frameWidth = 0;
+            int frameHeight = 0;
+            {
+                std::lock_guard<std::mutex> sessionLock(g_sessionMutex);
+                Session* session = g_session;
+                if (session) {
+                    std::lock_guard<std::mutex> frameLock(session->mutex);
+                    frameWidth = session->width;
+                    frameHeight = session->height;
+                    if (!session->pixels.empty() && session->version != textureVersion &&
+                        frameWidth > 0 && frameHeight > 0) {
+                        UploadTexture(session->pixels.data(), frameWidth, frameHeight, session->version);
+                    }
+                }
+            }
+
             glViewport(0, 0, w, h);
-            glDisable(GL_SCISSOR_TEST);
-            glClearColor(0.05f, 0.07f, 0.10f, 1.0f);
+            glClearColor(0.02f, 0.02f, 0.03f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
-            const auto now = std::chrono::steady_clock::now();
-            const double seconds = std::chrono::duration<double>(now - start).count();
-            const int barWidth = std::max(40, w / 12);
-            const int travel = std::max(1, w + barWidth);
-            int x = static_cast<int>(seconds * 240.0) % travel - barWidth;
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(x, 0, barWidth, h);
-            glClearColor(0.10f, 0.65f, 1.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glDisable(GL_SCISSOR_TEST);
+            if (texture != 0 && textureWidth > 0 && textureHeight > 0) {
+                const float scale = g_xViewScale.load();
+                const float offsetX = g_xOffsetX.load();
+                const float offsetY = g_xOffsetY.load();
+                const float base = std::min(static_cast<float>(w) / textureWidth,
+                    static_cast<float>(h) / textureHeight);
+                const float drawWidth = textureWidth * base * scale;
+                const float drawHeight = textureHeight * base * scale;
+                const float left = (w - drawWidth) * 0.5f + offsetX;
+                const float top = (h - drawHeight) * 0.5f + offsetY;
+                const float x0 = 2.0f * left / w - 1.0f;
+                const float x1 = 2.0f * (left + drawWidth) / w - 1.0f;
+                const float y0 = 1.0f - 2.0f * top / h;
+                const float y1 = 1.0f - 2.0f * (top + drawHeight) / h;
+                const float vertices[] = {
+                    x0, y0, 0.0f, 0.0f,
+                    x0, y1, 0.0f, 1.0f,
+                    x1, y1, 1.0f, 1.0f,
+                    x0, y0, 0.0f, 0.0f,
+                    x1, y1, 1.0f, 1.0f,
+                    x1, y0, 1.0f, 0.0f
+                };
+                glUseProgram(program);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, texture);
+                glBindBuffer(GL_ARRAY_BUFFER, vbo);
+                glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+                glEnableVertexAttribArray(0);
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+                glEnableVertexAttribArray(1);
+                glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                    reinterpret_cast<void*>(2 * sizeof(float)));
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+                glDisableVertexAttribArray(0);
+                glDisableVertexAttribArray(1);
+            }
             if (!eglSwapBuffers(display, surface)) {
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
+
+        if (vbo) glDeleteBuffers(1, &vbo);
+        if (texture) glDeleteTextures(1, &texture);
+        if (program) glDeleteProgram(program);
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         eglDestroyContext(display, context);
         eglDestroySurface(display, surface);
@@ -1058,6 +1226,7 @@ static void OnXSurfaceCreated(OH_NativeXComponent* component, void* window)
     if (component && window) {
         OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
         g_xTestRenderer.SetSize(static_cast<int>(width), static_cast<int>(height));
+        g_xComponentActive.store(true);
         g_xTestRenderer.Start(window);
     }
 }
@@ -1076,6 +1245,7 @@ static void OnXSurfaceDestroyed(OH_NativeXComponent* component, void* window)
 {
     (void)component;
     (void)window;
+    g_xComponentActive.store(false);
     g_xTestRenderer.Stop();
 }
 
@@ -1091,6 +1261,28 @@ static OH_NativeXComponent_Callback g_xComponentCallback = {
     OnXSurfaceDestroyed,
     OnXDispatchTouch
 };
+
+static napi_value SetXViewTransform(napi_env env, napi_callback_info info)
+{
+    size_t argc = 3;
+    napi_value args[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    double scale = 1.0;
+    double offsetX = 0.0;
+    double offsetY = 0.0;
+    if (argc >= 3) {
+        napi_get_value_double(env, args[0], &scale);
+        napi_get_value_double(env, args[1], &offsetX);
+        napi_get_value_double(env, args[2], &offsetY);
+    }
+    if (scale <= 0.0) scale = 1.0;
+    g_xViewScale.store(static_cast<float>(scale));
+    g_xOffsetX.store(static_cast<float>(offsetX));
+    g_xOffsetY.store(static_cast<float>(offsetY));
+    napi_value result;
+    napi_get_boolean(env, true, &result);
+    return result;
+}
 
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
@@ -1110,7 +1302,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "sendWheel", nullptr, SendWheel, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "sendMouseMove", nullptr, SendMouseMove, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "sendMouseMove", nullptr, SendMouseMove, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "setXViewTransform", nullptr, SetXViewTransform, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     napi_value exportInstance = nullptr;
