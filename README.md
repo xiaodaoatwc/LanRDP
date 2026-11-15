@@ -6,6 +6,12 @@
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
 
+## 1.14.3 更新 / What's New
+
+- H.264 解码只使用系统 VideoToolbox（显式请求硬件解码），App 不再分发 H.264 解码实现。
+- 渲染优化：合并脏矩形，窗口视频的纹理上传耗时约下降 40%；present 也只在有待处理更新时合并。
+- HarmonyOS 端使用系统 AVCodec 硬解（见 harmony 工作区）。
+
 ## 1.14.2 更新 / What's New
 
 ### 中文

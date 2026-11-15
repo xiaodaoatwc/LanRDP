@@ -1,0 +1,753 @@
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/client/SDL/SDL3/sdl_context.cpp freerdp-new/client/SDL/SDL3/sdl_context.cpp
+--- freerdp-base/client/SDL/SDL3/sdl_context.cpp	2026-11-15 23:58:10
++++ freerdp-new/client/SDL/SDL3/sdl_context.cpp	2026-11-15 23:58:17
+@@ -24,6 +24,8 @@
+ #include <cfloat>
+ 
+ #include "sdl_context.hpp"
++
++#include <freerdp/gdi/gfx.h>
+ #include "sdl_config.hpp"
+ #include "sdl_channels.hpp"
+ #include "sdl_monitor.hpp"
+@@ -1018,6 +1020,37 @@
+ 	}
+ }
+ 
++
++/* LanRDP: append r minus cut (up to four pieces). */
++static void subtract_rect(const SDL_Rect& r, const SDL_Rect& cut, std::vector<SDL_Rect>& out)
++{
++	if ((r.x >= cut.x + cut.w) || (cut.x >= r.x + r.w) || (r.y >= cut.y + cut.h) ||
++	    (cut.y >= r.y + r.h))
++	{
++		out.push_back(r);
++		return;
++	}
++
++	const int rBottom = r.y + r.h;
++	const int cutBottom = cut.y + cut.h;
++	if (r.y < cut.y)
++		out.push_back({ r.x, r.y, r.w, cut.y - r.y });
++	if (rBottom > cutBottom)
++		out.push_back({ r.x, cutBottom, r.w, rBottom - cutBottom });
++
++	const int top = (r.y > cut.y) ? r.y : cut.y;
++	const int bottom = (rBottom < cutBottom) ? rBottom : cutBottom;
++	if (bottom <= top)
++		return;
++
++	if (r.x < cut.x)
++		out.push_back({ r.x, top, cut.x - r.x, bottom - top });
++	const int rRight = r.x + r.w;
++	const int cutRight = cut.x + cut.w;
++	if (rRight > cutRight)
++		out.push_back({ cutRight, top, rRight - cutRight, bottom - top });
++}
++
+ bool SdlContext::drawToWindow(SdlWindow& window, const std::vector<SDL_Rect>& rects)
+ {
+ 	if (!isConnected())
+@@ -1031,6 +1064,43 @@
+ 	std::unique_lock lock(_critical);
+ 	auto surface = _primary.get();
+ 
++	window.setCoalesce(hasPendingUpdates());
++
++	/* LanRDP: optional AVC420 YUV overlay (no YUV->RGB conversion, 1.5B/px upload). */
++	/* Opt-in while the YUV overlay path is stabilised: set LANRDP_AVC_YUV=1
++	 * (e.g. launch the app from a terminal) to enable it. */
++	if (!gdi->avcYuvOverlay)
++	{
++		static const bool yuvOverlayEnabled = []() {
++			const char* env = getenv("LANRDP_AVC_YUV");
++			return env && (strcmp(env, "1") == 0);
++		}();
++		if (yuvOverlayEnabled)
++			gdi->avcYuvOverlay = TRUE;
++	}
++
++	gdiGfxSurface* overlay = nullptr;
++	if (gdi->avcYuvOverlay && gdi->gfx && gdi->gfx->GetSurfaceData)
++	{
++		gdiGfxSurface* ov = (gdiGfxSurface*)gdi->gfx->GetSurfaceData(gdi->gfx, 0);
++		if (ov && ov->avcYuvValid && ov->avcYuvPlanes[0] && (ov->avcYuvRight > ov->avcYuvLeft) &&
++		    (ov->avcYuvBottom > ov->avcYuvTop))
++			overlay = ov;
++	}
++
++	std::vector<SDL_Rect> drawList;
++	if (overlay)
++	{
++		const SDL_Rect cut = { (int)overlay->avcYuvLeft, (int)overlay->avcYuvTop,
++			                   (int)(overlay->avcYuvRight - overlay->avcYuvLeft),
++			                   (int)(overlay->avcYuvBottom - overlay->avcYuvTop) };
++		for (const auto& r : rects)
++			subtract_rect(r, cut, drawList);
++	}
++	else
++		drawList = rects;
++
++	SDL_Point offset{ 0, 0 };
+ 	if (useLocalScale())
+ 	{
+ 		window.setOffsetX(0);
+@@ -1046,18 +1116,52 @@
+ 
+ 		_localScale = { static_cast<float>(size.w) / static_cast<float>(gdi->width),
+ 			            static_cast<float>(size.h) / static_cast<float>(gdi->height) };
+-		if (!window.drawScaledRects(surface, _localScale, rects))
++		if (!window.drawScaledRects(surface, _localScale, drawList))
+ 			return false;
+ 	}
+ 	else
+ 	{
+-		SDL_Point offset{ 0, 0 };
+ 		if (freerdp_settings_get_bool(context()->settings, FreeRDP_UseMultimon))
+ 			offset = { window.offsetX(), window.offsetY() };
+-		if (!window.drawRects(surface, offset, rects))
++		if (!window.drawRects(surface, offset, drawList))
+ 			return false;
+ 	}
+ 
++	if (overlay)
++	{
++		/* The RDP thread may rewrite (or free) the overlay buffers at any time;
++		 * hold the gdi overlay lock while the texture upload reads them. */
++		EnterCriticalSection(&gdi->avcYuvLock);
++		const BOOL uploaded = [&]() {
++			const UINT32 w = overlay->avcYuvWidth;
++			const UINT32 cw = (w + 1) / 2;
++			const SDL_Rect src = { (int)overlay->avcYuvLeft, (int)overlay->avcYuvTop,
++				                   (int)(overlay->avcYuvRight - overlay->avcYuvLeft),
++				                   (int)(overlay->avcYuvBottom - overlay->avcYuvTop) };
++			if ((src.w <= 0) || (src.h <= 0) ||
++			    (src.x < 0) || (src.y < 0) ||
++			    ((src.x + src.w) > (int)w) || ((src.y + src.h) > (int)overlay->avcYuvHeight))
++				return FALSE;
++			const Uint8* y = overlay->avcYuvPlanes[0] + (size_t)src.y * w + src.x;
++			const Uint8* u = overlay->avcYuvPlanes[1] + (size_t)(src.y / 2) * cw + (src.x / 2);
++			const Uint8* v = overlay->avcYuvPlanes[2] + (size_t)(src.y / 2) * cw + (src.x / 2);
++
++			SDL_FRect dst = { 0, 0, 0, 0 };
++			if (useLocalScale())
++				dst = { src.x * _localScale.x + window.offsetX(),
++				        src.y * _localScale.y + window.offsetY(), src.w * _localScale.x,
++				        src.h * _localScale.y };
++			else
++				dst = { (float)(src.x + offset.x), (float)(src.y + offset.y), (float)src.w,
++				        (float)src.h };
++
++			return window.drawYuvOverlay(y, u, v, w, cw, src, dst);
++		}();
++		LeaveCriticalSection(&gdi->avcYuvLock);
++		if (!uploaded)
++			return false;
++	}
++
+ 	window.updateSurface();
+ 	return true;
+ }
+@@ -1850,6 +1954,23 @@
+ 		std::unique_lock lock(_critical);
+ 		if ((drawRects.empty() || firstShow) && _primary)
+ 			drawRects = { { 0, 0, _primary->w, _primary->h } };
++	}
++
++	/* LanRDP: a large batch of small dirty rects costs far more in per-call
++	 * SDL_UpdateTexture overhead than the extra pixels a single bounding box
++	 * uploads. Collapse such batches into one rectangle. */
++	if (drawRects.size() > 32)
++	{
++		SDL_Rect box = drawRects[0];
++		for (const auto& r : drawRects)
++		{
++			const int x1 = (box.x < r.x) ? box.x : r.x;
++			const int y1 = (box.y < r.y) ? box.y : r.y;
++			const int x2 = (box.x + box.w > r.x + r.w) ? box.x + box.w : r.x + r.w;
++			const int y2 = (box.y + box.h > r.y + r.h) ? box.y + box.h : r.y + r.h;
++			box = { x1, y1, x2 - x1, y2 - y1 };
++		}
++		drawRects.assign(1, box);
+ 	}
+ 
+ 	/* LanRDP: draw while the window is still hidden, then show it, so the
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/client/SDL/SDL3/sdl_window.cpp freerdp-new/client/SDL/SDL3/sdl_window.cpp
+--- freerdp-base/client/SDL/SDL3/sdl_window.cpp	2026-11-15 23:58:08
++++ freerdp-new/client/SDL/SDL3/sdl_window.cpp	2026-11-15 23:58:17
+@@ -27,6 +27,11 @@
+ 
+ #include <freerdp/utils/string.h>
+ 
++#include <winpr/wlog.h>
++
++#define TAG "com.freerdp.client.SDL"
++
++
+ SdlWindow::SdlWindow(SDL_DisplayID id, const std::string& title, const SDL_Rect& rect,
+                      [[maybe_unused]] Uint32 flags)
+     : _initialW(rect.w), _initialH(rect.h), _displayID(id)
+@@ -657,11 +662,52 @@
+ 	return true;
+ }
+ 
++void SdlWindow::setCoalesce(bool coalesce)
++{
++	_coalesce = coalesce;
++}
++
++bool SdlWindow::drawYuvOverlay(const Uint8* y, const Uint8* u, const Uint8* v, Uint32 yStride,
++                              Uint32 uvStride, const SDL_Rect& src, const SDL_FRect& dst)
++{
++	if (!_renderer || !y || !u || !v || (src.w <= 0) || (src.h <= 0))
++		return false;
++
++	if (!_yuvTexture || (_yuvTextureW != src.w) || (_yuvTextureH != src.h))
++	{
++		if (_yuvTexture)
++			SDL_DestroyTexture(_yuvTexture);
++		_yuvTexture = SDL_CreateTexture(_renderer, SDL_PIXELFORMAT_IYUV,
++		                                SDL_TEXTUREACCESS_STREAMING, src.w, src.h);
++		if (!_yuvTexture)
++			return false;
++		(void)SDL_SetTextureBlendMode(_yuvTexture, SDL_BLENDMODE_NONE);
++		_yuvTextureW = src.w;
++		_yuvTextureH = src.h;
++	}
++
++	if (!SDL_UpdateYUVTexture(_yuvTexture, nullptr, y, (int)yStride, u, (int)uvStride, v,
++	                          (int)uvStride))
++		return false;
++
++	if (!SDL_SetRenderTarget(_renderer, _renderTarget))
++		return false;
++	if (!SDL_RenderTexture(_renderer, _yuvTexture, nullptr, &dst))
++		return false;
++	return true;
++}
++
+ void SdlWindow::updateSurface()
+ {
+ 	if (!_renderer)
+ 		return;
+ 
++	/* LanRDP: coalesce presents while more damage is queued (another present
++	 * follows within a few milliseconds). The last frame of a burst is never
++	 * deferred because _coalesce is only set when more updates are pending. */
++	if (_coalesce && (_lastPresent != 0) && ((SDL_GetTicks() - _lastPresent) < 8))
++		return;
++
+ 	ensureRenderTarget();
+ 
+ 	/* Copy accumulated render target to screen and present */
+@@ -671,6 +717,7 @@
+ 		return;
+ 	if (!SDL_RenderPresent(_renderer))
+ 		return;
++	_lastPresent = SDL_GetTicks();
+ }
+ 
+ bool SdlWindow::paintResizeFrame(SDL_Surface* surface, SDL_Point off, bool contentChanged,
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/client/SDL/SDL3/sdl_window.hpp freerdp-new/client/SDL/SDL3/sdl_window.hpp
+--- freerdp-base/client/SDL/SDL3/sdl_window.hpp	2026-11-02 18:35:33
++++ freerdp-new/client/SDL/SDL3/sdl_window.hpp	2026-11-15 23:58:17
+@@ -71,6 +71,7 @@
+ 	void raise();
+ 	void resizeable(bool use);
+ 	void fullscreen(bool enter, bool forceOriginalDisplay);
++	void fitToUsableBounds();
+ 	void minimize();
+ 
+ 	[[nodiscard]] bool resizeToScale();
+@@ -88,6 +89,10 @@
+ 	[[nodiscard]] bool fill(Uint8 r = 0x00, Uint8 g = 0x00, Uint8 b = 0x00, Uint8 a = 0xff);
+ 
+ 	[[nodiscard]] bool blit(SDL_Surface* surface, const SDL_Rect& src, SDL_Rect& dst);
++	[[nodiscard]] bool drawYuvOverlay(const Uint8* y, const Uint8* u, const Uint8* v,
++	                                  Uint32 yStride, Uint32 uvStride, const SDL_Rect& src,
++	                                  const SDL_FRect& dst);
++	void setCoalesce(bool coalesce);
+ 	/* Render interactive resize feedback overlay. */
+ 	bool paintResizeFrame(SDL_Surface* surface, SDL_Point off, bool contentChanged,
+ 	                      const SDL_Rect& inset = { 0, 0, 0, 0 }, bool fillRevealed = true,
+@@ -124,7 +129,12 @@
+ 	SDL_Window* _window = nullptr;
+ 	SDL_Renderer* _renderer = nullptr;
+ 	SDL_Texture* _renderTarget = nullptr;
++	bool _coalesce = false;
++	Uint64 _lastPresent = 0;
+ 	SDL_Texture* _gdiTexture = nullptr;
++	SDL_Texture* _yuvTexture = nullptr;
++	int _yuvTextureW = 0;
++	int _yuvTextureH = 0;
+ 	int _gdiTextureW = 0;
+ 	int _gdiTextureH = 0;
+ 	int _initialW = 0;
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/include/freerdp/codec/h264.h freerdp-new/include/freerdp/codec/h264.h
+--- freerdp-base/include/freerdp/codec/h264.h	2026-11-02 18:35:33
++++ freerdp-new/include/freerdp/codec/h264.h	2026-11-15 23:58:17
+@@ -97,6 +97,15 @@
+ 	FREERDP_API INT32 h264_get_yuv_buffer(H264_CONTEXT* h264, UINT32 nSrcStride, UINT32 nSrcWidth,
+ 	                                      UINT32 nSrcHeight, BYTE* YUVData[3], UINT32 stride[3]);
+ 
++	/* LanRDP: decode-only AVC420 helpers (no RGB conversion, YUV overlay rendering). */
++	WINPR_ATTR_NODISCARD
++	FREERDP_API INT32 avc420_decompress_yuv(H264_CONTEXT* h264, const BYTE* pSrcData,
++	                                        UINT32 SrcSize, const RECTANGLE_16* regionRects,
++	                                        UINT32 numRegionRects);
++	WINPR_ATTR_NODISCARD
++	FREERDP_API INT32 h264_get_decoded_yuv(H264_CONTEXT* h264, const BYTE* YUVData[3],
++	                                       UINT32 stride[3], UINT32* width, UINT32* height);
++
+ 	/**
+ 	 * @brief Compress currently filled image data to H264 stream
+ 	 *
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/include/freerdp/gdi/gdi.h freerdp-new/include/freerdp/gdi/gdi.h
+--- freerdp-base/include/freerdp/gdi/gdi.h	2026-11-02 18:35:33
++++ freerdp-new/include/freerdp/gdi/gdi.h	2026-11-15 23:58:17
+@@ -23,6 +23,7 @@
+ #define FREERDP_GDI_H
+ 
+ #include <winpr/wlog.h>
++#include <winpr/synch.h>
+ 
+ #include <freerdp/api.h>
+ #include <freerdp/types.h>
+@@ -511,6 +512,8 @@
+ 		void (*free)(void*);
+ 
+ 		BOOL inGfxFrame;
++		BOOL avcYuvOverlay; /* LanRDP: keep AVC420 frames as YUV for the client */
++		CRITICAL_SECTION avcYuvLock; /* LanRDP: protects the AVC420 YUV overlay buffers */
+ 		BOOL graphicsReset; /* deprecated, remove with FreeRDP v3 */
+ 		BOOL suppressOutput;
+ 		UINT16 outputSurfaceId;
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/include/freerdp/gdi/gfx.h freerdp-new/include/freerdp/gdi/gfx.h
+--- freerdp-base/include/freerdp/gdi/gfx.h	2026-11-02 18:35:33
++++ freerdp-new/include/freerdp/gdi/gfx.h	2026-11-15 23:58:17
+@@ -49,6 +49,24 @@
+ 		UINT32 outputTargetHeight;
+ 		BOOL windowMapped;
+ 		BOOL handleInUpdateSurfaceArea;
++		/* LanRDP: AVC420 YUV overlay (avoids the YUV->RGB conversion and the
++		 * 4 bytes/pixel upload). Filled by gdi_SurfaceCommand_AVC420 when
++		 * rdpGdi::avcYuvOverlay is enabled. */
++		BOOL avcYuvValid;
++		UINT32 avcYuvLeft;
++		UINT32 avcYuvTop;
++		UINT32 avcYuvRight;
++		UINT32 avcYuvBottom;
++		UINT32 avcYuvWidth;
++		UINT32 avcYuvHeight;
++		UINT32 avcYuvStride[3];
++		BYTE* avcYuvPlanes[3];
++		/* Last AVC420 bitstream: re-decoded to RGB when a bitmap update
++		 * overlaps the overlay (rare, but required for correctness). */
++		BYTE* avcLastData;
++		UINT32 avcLastSize;
++		void* avcLastRects;
++		UINT32 avcLastNumRects;
+ #if defined(WITH_GFX_AV1)
+ 		FREERDP_AV1_CONTEXT* av1; /** @since version 3.25.0 */
+ #else
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/libfreerdp/codec/h264.c freerdp-new/libfreerdp/codec/h264.c
+--- freerdp-base/libfreerdp/codec/h264.c	2026-11-02 18:35:33
++++ freerdp-new/libfreerdp/codec/h264.c	2026-11-15 23:58:17
+@@ -207,6 +207,24 @@
+ 	return 1;
+ }
+ 
++/**
++ * LanRDP: decode an AVC420 frame but leave the result as YUV in the h264 context
++ * (h264->pYUVData / h264->iStride / YUVWidth / YUVHeight) instead of converting it
++ * to RGB. Returns <0 on error, 0 when no picture is available yet, >0 when the
++ * YUV planes have been updated.
++ */
++INT32 avc420_decompress_yuv(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize,
++                            const RECTANGLE_16* regionRects, UINT32 numRegionRects)
++{
++	if (!h264 || h264->Compressor)
++		return -1001;
++
++	if (!areRectsValid(h264->log, h264->width, h264->height, regionRects, numRegionRects))
++		return -1013;
++
++	return log_decompress(h264, pSrcData, SrcSize, regionRects, numRegionRects);
++}
++
+ WINPR_ATTR_NODISCARD
+ static BOOL allocate_h264_metablock(UINT32 QP, RECTANGLE_16* rectangles,
+                                     RDPGFX_H264_METABLOCK* meta, size_t count)
+@@ -321,6 +339,24 @@
+ 	if (!allocate_h264_metablock(QP, rectangles, meta, count))
+ 		return FALSE;
+ 	return TRUE;
++}
++
++INT32 h264_get_decoded_yuv(H264_CONTEXT* h264, const BYTE* YUVData[3], UINT32 stride[3],
++                           UINT32* width, UINT32* height)
++{
++	if (!h264 || h264->Compressor || !h264->pYUVData[0] || !YUVData || !stride)
++		return -1;
++
++	for (size_t x = 0; x < 3; x++)
++	{
++		YUVData[x] = h264->pYUVData[x];
++		stride[x] = h264->iStride[x];
++	}
++	if (width)
++		*width = h264->YUVWidth;
++	if (height)
++		*height = h264->YUVHeight;
++	return 0;
+ }
+ 
+ INT32 h264_get_yuv_buffer(H264_CONTEXT* h264, UINT32 nSrcStride, UINT32 nSrcWidth,
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/libfreerdp/codec/h264_videotoolbox.c freerdp-new/libfreerdp/codec/h264_videotoolbox.c
+--- freerdp-base/libfreerdp/codec/h264_videotoolbox.c	2026-11-02 18:35:33
++++ freerdp-new/libfreerdp/codec/h264_videotoolbox.c	2026-11-15 23:58:17
+@@ -344,10 +344,19 @@
+ 		return FALSE;
+ 	}
+ 	const VTDecompressionOutputCallbackRecord callback = { videotoolbox_output, nullptr };
+-	/* A NULL decoder specification leaves hardware/software selection to Apple.
+-	 * SoftwareGdi and H264_CONTEXT_OPTION_HW_ACCEL deliberately do not control it. */
+-	status = VTDecompressionSessionCreate(kCFAllocatorDefault, format, nullptr, attributes,
++	/* LanRDP: ask for the hardware decoder explicitly. Apple Silicon has a hardware
++	 * H.264 decoder; the hint falls back to software automatically for profiles the
++	 * hardware does not support (e.g. 4:4:4). */
++	CFMutableDictionaryRef spec =
++	    CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
++	                              &kCFTypeDictionaryValueCallBacks);
++	if (spec)
++		CFDictionarySetValue(spec, kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder,
++		                     kCFBooleanTrue);
++	status = VTDecompressionSessionCreate(kCFAllocatorDefault, format, spec, attributes,
+ 	                                      &callback, &sys->session);
++	if (spec)
++		CFRelease(spec);
+ 	CFRelease(attributes);
+ 	if (status != noErr)
+ 	{
+@@ -355,6 +364,19 @@
+ 		CFRelease(format);
+ 		return FALSE;
+ 	}
++	{
++		CFBooleanRef usingHw = nullptr;
++		if (VTSessionCopyProperty(sys->session,
++		                          kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
++		                          kCFAllocatorDefault, (void*)&usingHw) == noErr &&
++		    usingHw)
++		{
++			WLog_Print(h264->log, WLOG_WARN, "VideoToolbox H.264 hardware decode: %s",
++			           CFBooleanGetValue(usingHw) ? "yes" : "no");
++			CFRelease(usingHw);
++		}
++	}
++
+ 	sys->format = format;
+ 	sys->pixelFormat = pixelFormat;
+ 	sys->ppsId = ppsId;
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/libfreerdp/gdi/gdi.c freerdp-new/libfreerdp/gdi/gdi.c
+--- freerdp-base/libfreerdp/gdi/gdi.c	2026-11-02 18:35:33
++++ freerdp-new/libfreerdp/gdi/gdi.c	2026-11-15 23:58:17
+@@ -1465,6 +1465,7 @@
+ 
+ 	context->gdi = gdi;
+ 	gdi->log = WLog_Get(TAG);
++	InitializeCriticalSection(&gdi->avcYuvLock);
+ 
+ 	if (!gdi->log)
+ 		goto fail;
+@@ -1517,6 +1518,7 @@
+ 	{
+ 		gdi_bitmap_free_ex(gdi->primary);
+ 		gdi_DeleteDC(gdi->hdc);
++		DeleteCriticalSection(&gdi->avcYuvLock);
+ 		free(gdi);
+ 	}
+ 
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store freerdp-base/libfreerdp/gdi/gfx.c freerdp-new/libfreerdp/gdi/gfx.c
+--- freerdp-base/libfreerdp/gdi/gfx.c	2026-11-02 18:35:33
++++ freerdp-new/libfreerdp/gdi/gfx.c	2026-11-15 23:58:17
+@@ -696,6 +696,188 @@
+  * @return 0 on success, otherwise a Win32 error code
+  */
+ WINPR_ATTR_NODISCARD
++#ifdef WITH_GFX_H264
++static void gdi_avc_yuv_free_locked(gdiGfxSurface* surface)
++{
++	if (!surface)
++		return;
++	free(surface->avcYuvPlanes[0]);
++	free(surface->avcYuvPlanes[1]);
++	free(surface->avcYuvPlanes[2]);
++	surface->avcYuvPlanes[0] = nullptr;
++	surface->avcYuvPlanes[1] = nullptr;
++	surface->avcYuvPlanes[2] = nullptr;
++	free(surface->avcLastData);
++	surface->avcLastData = nullptr;
++	surface->avcLastSize = 0;
++	free(surface->avcLastRects);
++	surface->avcLastRects = nullptr;
++	surface->avcLastNumRects = 0;
++	surface->avcYuvValid = FALSE;
++}
++static void gdi_avc_yuv_free(rdpGdi* gdi, gdiGfxSurface* surface)
++{
++	if (!gdi || !surface)
++		return;
++	EnterCriticalSection(&gdi->avcYuvLock);
++	gdi_avc_yuv_free_locked(surface);
++	LeaveCriticalSection(&gdi->avcYuvLock);
++}
++
++static BOOL gdi_avc_yuv_capture_locked(rdpGdi* gdi, gdiGfxSurface* surface,
++                                const RDPGFX_H264_METABLOCK* meta,
++                                const RDPGFX_AVC420_BITMAP_STREAM* bs)
++{
++	WINPR_ASSERT(gdi);
++	WINPR_ASSERT(surface);
++	WINPR_ASSERT(meta);
++	WINPR_ASSERT(bs);
++
++	const BYTE* planes[3] = { 0 };
++	UINT32 strides[3] = { 0 };
++	UINT32 w = 0;
++	UINT32 h = 0;
++	if (h264_get_decoded_yuv(surface->h264, planes, strides, &w, &h) < 0)
++		return FALSE;
++	if ((w == 0) || (h == 0) || (w > surface->width) || (h > surface->height))
++		return FALSE;
++
++	const UINT32 cw = (w + 1) / 2;
++	const UINT32 ch = (h + 1) / 2;
++	const UINT32 yStride = strides[0];
++	const UINT32 uStride = strides[1];
++	const UINT32 vStride = strides[2];
++
++	if (!surface->avcYuvPlanes[0])
++	{
++		surface->avcYuvPlanes[0] = malloc((size_t)w * h);
++		surface->avcYuvPlanes[1] = malloc((size_t)cw * ch);
++		surface->avcYuvPlanes[2] = malloc((size_t)cw * ch);
++		if (!surface->avcYuvPlanes[0] || !surface->avcYuvPlanes[1] ||
++		    !surface->avcYuvPlanes[2])
++		{
++			gdi_avc_yuv_free(gdi, surface);
++			return FALSE;
++		}
++	}
++
++	for (UINT32 y = 0; y < h; y++)
++		memcpy(surface->avcYuvPlanes[0] + (size_t)y * w,
++		       planes[0] + (size_t)y * yStride, w);
++	for (UINT32 y = 0; y < ch; y++)
++	{
++		memcpy(surface->avcYuvPlanes[1] + (size_t)y * cw,
++		       planes[1] + (size_t)y * uStride, cw);
++		memcpy(surface->avcYuvPlanes[2] + (size_t)y * cw,
++		       planes[2] + (size_t)y * vStride, cw);
++	}
++
++	UINT32 left = UINT32_MAX;
++	UINT32 top = UINT32_MAX;
++	UINT32 right = 0;
++	UINT32 bottom = 0;
++	for (UINT32 i = 0; i < meta->numRegionRects; i++)
++	{
++		const RECTANGLE_16* r = &meta->regionRects[i];
++		left = (r->left < left) ? r->left : left;
++		top = (r->top < top) ? r->top : top;
++		right = (r->right > right) ? r->right : right;
++		bottom = (r->bottom > bottom) ? r->bottom : bottom;
++	}
++	if (right <= left || bottom <= top)
++	{
++		left = 0;
++		top = 0;
++		right = w;
++		bottom = h;
++	}
++
++	BYTE* lastData = nullptr;
++	RECTANGLE_16* lastRects = nullptr;
++	if (bs->data && (bs->length > 0) && (meta->numRegionRects > 0))
++	{
++		lastData = malloc(bs->length);
++		lastRects = calloc(meta->numRegionRects, sizeof(RECTANGLE_16));
++		if (!lastData || !lastRects)
++		{
++			free(lastData);
++			free(lastRects);
++			return FALSE;
++		}
++		memcpy(lastData, bs->data, bs->length);
++		memcpy(lastRects, meta->regionRects, meta->numRegionRects * sizeof(RECTANGLE_16));
++	}
++
++	free(surface->avcLastData);
++	free(surface->avcLastRects);
++	surface->avcLastData = lastData;
++	surface->avcLastSize = lastData ? bs->length : 0;
++	surface->avcLastRects = lastRects;
++	surface->avcLastNumRects = lastRects ? meta->numRegionRects : 0;
++
++	surface->avcYuvLeft = left;
++	surface->avcYuvTop = top;
++	surface->avcYuvRight = right;
++	surface->avcYuvBottom = bottom;
++	surface->avcYuvWidth = w;
++	surface->avcYuvHeight = h;
++	surface->avcYuvStride[0] = w;
++	surface->avcYuvStride[1] = cw;
++	surface->avcYuvStride[2] = cw;
++	surface->avcYuvValid = TRUE;
++	return TRUE;
++}
++
++static void gdi_avc_yuv_flush_locked(rdpGdi* gdi, RdpgfxClientContext* context, gdiGfxSurface* surface)
++{
++	WINPR_ASSERT(gdi);
++	WINPR_ASSERT(context);
++	WINPR_ASSERT(surface);
++
++	if (!surface->avcYuvValid)
++		return;
++
++	if (surface->avcLastData && (surface->avcLastSize > 0) && surface->avcLastRects &&
++	    (surface->avcLastNumRects > 0) && surface->h264)
++	{
++		(void)avc420_decompress(surface->h264, surface->avcLastData, surface->avcLastSize,
++		                        surface->data, surface->format, surface->scanline,
++		                        surface->width, surface->height,
++		                        (const RECTANGLE_16*)surface->avcLastRects,
++		                        surface->avcLastNumRects);
++	}
++
++	RECTANGLE_16 r = { 0 };
++	r.left = (UINT16)MIN(surface->avcYuvLeft, UINT16_MAX);
++	r.top = (UINT16)MIN(surface->avcYuvTop, UINT16_MAX);
++	r.right = (UINT16)MIN(surface->avcYuvRight, UINT16_MAX);
++	r.bottom = (UINT16)MIN(surface->avcYuvBottom, UINT16_MAX);
++	(void)region16_union_rect(&surface->invalidRegion, &surface->invalidRegion, &r);
++	if (context->UpdateSurfaceArea)
++		(void)IFCALLRESULT(CHANNEL_RC_OK, context->UpdateSurfaceArea, context,
++		                   surface->surfaceId, 1, &r);
++
++	gdi_avc_yuv_free(gdi, surface);
++}
++#endif
++
++static BOOL gdi_avc_yuv_capture(rdpGdi* gdi, gdiGfxSurface* surface,
++                                const RDPGFX_H264_METABLOCK* meta,
++                                const RDPGFX_AVC420_BITMAP_STREAM* bs)
++{
++	EnterCriticalSection(&gdi->avcYuvLock);
++	const BOOL rc = gdi_avc_yuv_capture_locked(gdi, surface, meta, bs);
++	LeaveCriticalSection(&gdi->avcYuvLock);
++	return rc;
++}
++
++static void gdi_avc_yuv_flush(rdpGdi* gdi, RdpgfxClientContext* context, gdiGfxSurface* surface)
++{
++	EnterCriticalSection(&gdi->avcYuvLock);
++	gdi_avc_yuv_flush_locked(gdi, context, surface);
++	LeaveCriticalSection(&gdi->avcYuvLock);
++}
++
+ static UINT gdi_SurfaceCommand_AVC420(rdpGdi* gdi, RdpgfxClientContext* context,
+                                       const RDPGFX_SURFACE_COMMAND* cmd)
+ {
+@@ -750,6 +932,35 @@
+ 		return ERROR_INTERNAL_ERROR;
+ 
+ 	meta = &(bs->meta);
++
++	if (gdi->avcYuvOverlay)
++	{
++		const INT32 yuvRc = avc420_decompress_yuv(surface->h264, bs->data, bs->length,
++		                                          meta->regionRects, meta->numRegionRects);
++		if (yuvRc > 0)
++		{
++			if (gdi_avc_yuv_capture(gdi, surface, meta, bs))
++			{
++				for (UINT32 i = 0; i < meta->numRegionRects; i++)
++				{
++					if (!region16_union_rect(&(surface->invalidRegion),
++					                         &(surface->invalidRegion),
++					                         &(meta->regionRects[i])))
++						goto fail;
++				}
++
++				status = IFCALLRESULT(CHANNEL_RC_OK, context->UpdateSurfaceArea, context,
++				                      surface->surfaceId, meta->numRegionRects,
++				                      meta->regionRects);
++				if (status != CHANNEL_RC_OK)
++					goto fail;
++
++				status = gdi_interFrameUpdate(gdi, context);
++				goto fail;
++			}
++		}
++	}
++
+ 	rc = avc420_decompress(surface->h264, bs->data, bs->length, surface->data, surface->format,
+ 	                       surface->scanline, surface->width, surface->height, meta->regionRects,
+ 	                       meta->numRegionRects);
+@@ -1208,6 +1419,29 @@
+ 	dump_cmd(cmd, gdi->frameId);
+ #endif
+ 
++#ifdef WITH_GFX_H264
++	if (gdi->avcYuvOverlay && (codecId != RDPGFX_CODECID_AVC420))
++	{
++		if (context->GetSurfaceData)
++		{
++			gdiGfxSurface* overlay = (gdiGfxSurface*)context->GetSurfaceData(
++			    context, (UINT16)MIN(UINT16_MAX, cmd->surfaceId));
++			if (overlay && overlay->avcYuvValid)
++			{
++				/* Only a bitmap update that actually overlaps the overlay region
++				 * invalidates it; unrelated updates must not force the expensive
++				 * RGB fallback (progressive UI updates arrive continuously). */
++				const BOOL intersects =
++				    (cmd->left < overlay->avcYuvRight) && (cmd->right > overlay->avcYuvLeft) &&
++				    (cmd->top < overlay->avcYuvBottom) && (cmd->bottom > overlay->avcYuvTop);
++				const BOOL noArea = (cmd->right <= cmd->left) || (cmd->bottom <= cmd->top);
++				if (intersects || noArea)
++					gdi_avc_yuv_flush(gdi, context, overlay);
++			}
++		}
++	}
++#endif
++
+ 	switch (codecId)
+ 	{
+ 		case RDPGFX_CODECID_UNCOMPRESSED:
+@@ -1261,6 +1495,7 @@
+ 	}
+ 
+ 	LeaveCriticalSection(&context->mux);
++
+ 	return status;
+ }
+ 
+@@ -1382,6 +1617,7 @@
+ 	UINT res = ERROR_INTERNAL_ERROR;
+ 	rdpCodecs* codecs = nullptr;
+ 	gdiGfxSurface* surface = nullptr;
++	rdpGdi* gdi = (rdpGdi*)context->custom;
+ 	EnterCriticalSection(&context->mux);
+ 
+ 	WINPR_ASSERT(context->GetSurfaceData);
+@@ -1394,6 +1630,8 @@
+ 			                  surface->windowId);
+ 
+ #ifdef WITH_GFX_H264
++		if (gdi)
++			gdi_avc_yuv_free(gdi, surface);
+ 		h264_context_free(surface->h264);
+ #endif
+ #if defined(WITH_GFX_AV1)

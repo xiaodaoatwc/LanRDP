@@ -92,6 +92,21 @@ patch -p1 < patches/0007-sdl-window-fullscreen-only.patch
 patch -p1 < patches/0008-sdl-input-hotkey-modifier.patch
 patch -p1 < patches/0009-sdl-bounded-frame-draw.patch
 patch -p1 < patches/0010-bpp-keeps-gfx-defaults.patch
+patch -p1 < patches/0011-sdl-coalescing-yuv-overlay-vt-hw.patch
 ```
 
-修改日期：2026-11-08，2026-11-13 增补第 8 项，2026-11-15 增补第 9、10 项。
+## 11. SDL 渲染合并、VideoToolbox 硬件解码提示、可选 YUV 叠加
+
+- **修改**：
+  - `client/SDL/SDL3/sdl_context.cpp`、`sdl_window.cpp/.hpp`：一次更新内的脏矩形超过 32 个时
+    合并成包围盒，一次 `SDL_UpdateTexture` 代替几十次小调用；仅在还有未处理更新时才合并 present；
+  - `libfreerdp/codec/h264_videotoolbox.c`：显式请求硬件解码
+    （`kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder`），并在建会话时记录
+    一次是否使用硬件解码；
+  - 可选的 AVC420 YUV 叠加渲染（`avc420_decompress_yuv` / `rdpGdi::avcYuvOverlay`），
+    **默认关闭**，需环境变量 `LANRDP_AVC_YUV=1` 才启用；实验特性，未验证稳定。
+- **原因**：窗口视频时每秒 1000+ 次小矩形上传，每次调用开销把有效带宽从 ~4.8GB/s 拖到 ~2.6GB/s；
+  Apple Silicon 的 H.264 硬解需要显式提示才更有保障。
+- **效果**：窗口视频上传耗时 72 → 43 ms/s（-40%），全屏 52 → 42 ms/s（-20%）。
+
+修改日期：2026-11-08，2026-11-13 增补第 8 项，2026-11-15 增补第 9、10、11 项。
