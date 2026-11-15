@@ -85,12 +85,23 @@ enum SessionState {
     SESSION_FAILED = 4
 };
 
+struct DamageRect {
+    int left;
+    int top;
+    int right;
+    int bottom;
+};
+
 struct Session {
     freerdp* instance = nullptr;
     rdpContext* context = nullptr;
     std::thread thread;
     std::mutex mutex;
     std::vector<uint8_t> pixels;
+    std::vector<DamageRect> damage;
+    std::vector<DamageRect> uploadDamage;
+    bool damageFull = false;
+    bool uploadFull = false;
     napi_env frameEnv = nullptr;
     napi_ref frontRef = nullptr;
     napi_ref backRef = nullptr;
@@ -178,6 +189,44 @@ static void SetSessionState(Session* session, int state, const std::string& erro
     session->lastError = error;
 }
 
+static void CollectDamage(Session* session, rdpGdi* gdi, int width, int height)
+{
+    if (!session || !gdi || !gdi->primary || !gdi->primary->hdc)
+        return;
+    HGDI_DC hdc = gdi->primary->hdc;
+    if (!hdc->hwnd)
+        return;
+    const HGDI_WND hwnd = hdc->hwnd;
+    if (!hwnd->invalid || hwnd->invalid->null)
+        return;
+    const INT32 count = hwnd->ninvalid;
+    if (count <= 0)
+        return;
+    if (count > 64 || !hwnd->cinvalid) {
+        session->damageFull = true;
+        session->damage.clear();
+        return;
+    }
+    for (INT32 i = 0; i < count; ++i) {
+        const GDI_RGN& rgn = hwnd->cinvalid[i];
+        if (rgn.null || rgn.w <= 0 || rgn.h <= 0)
+            continue;
+        DamageRect rect;
+        rect.left = std::max(0, rgn.x);
+        rect.top = std::max(0, rgn.y);
+        rect.right = std::min(width, rgn.x + rgn.w);
+        rect.bottom = std::min(height, rgn.y + rgn.h);
+        if (rect.right <= rect.left || rect.bottom <= rect.top)
+            continue;
+        if (rect.right - rect.left >= width && rect.bottom - rect.top >= height) {
+            session->damageFull = true;
+            session->damage.clear();
+            return;
+        }
+        session->damage.push_back(rect);
+    }
+}
+
 static BOOL SessionBeginPaint(rdpContext* context)
 {
     (void)context;
@@ -205,7 +254,12 @@ static BOOL SessionEndPaint(rdpContext* context)
     std::lock_guard<std::mutex> lock(session->mutex);
     session->width = width;
     session->height = height;
-    if (g_xComponentActive.load() || session->nativeBound) {
+    if (g_xComponentActive.load()) {
+        CollectDamage(session, gdi, width, height);
+        session->pendingNativeFrame = true;
+        return TRUE;
+    }
+    if (session->nativeBound) {
         session->pendingNativeFrame = true;
         return TRUE;
     }
@@ -250,14 +304,46 @@ static void FlushNativeFrame(Session* session)
     }
     if (g_xComponentActive.load()) {
         const auto writeStart = std::chrono::steady_clock::now();
-        session->pixels.resize(static_cast<size_t>(width) * height * 4);
-        const BOOL copied = freerdp_image_copy(
-            session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
-            0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
-            gdi->primary_buffer, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE);
+        const size_t needed = static_cast<size_t>(width) * height * 4;
+        bool full = session->damageFull || session->pixels.size() != needed;
+        bool copied = true;
+        session->pixels.resize(needed);
+        if (full) {
+            copied = freerdp_image_copy(
+                session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
+                0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+                gdi->primary_buffer, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE) != FALSE;
+        } else {
+            for (const DamageRect& rect : session->damage) {
+                const int rw = rect.right - rect.left;
+                const int rh = rect.bottom - rect.top;
+                if (rw <= 0 || rh <= 0)
+                    continue;
+                if (!freerdp_image_copy(
+                        session->pixels.data(), PIXEL_FORMAT_BGRA32,
+                        static_cast<UINT32>(width * 4), rect.left, rect.top,
+                        static_cast<UINT32>(rw), static_cast<UINT32>(rh),
+                        gdi->primary_buffer, format, stride, rect.left, rect.top,
+                        nullptr, FREERDP_FLIP_NONE)) {
+                    copied = false;
+                    break;
+                }
+            }
+        }
+        if (!copied) {
+            full = true;
+            copied = freerdp_image_copy(
+                session->pixels.data(), PIXEL_FORMAT_BGRA32, static_cast<UINT32>(width * 4),
+                0, 0, static_cast<UINT32>(width), static_cast<UINT32>(height),
+                gdi->primary_buffer, format, stride, 0, 0, nullptr, FREERDP_FLIP_NONE) != FALSE;
+        }
         const auto writeEnd = std::chrono::steady_clock::now();
         session->nativeWriteMs = std::chrono::duration<double, std::milli>(writeEnd - writeStart).count();
         if (copied) {
+            session->uploadFull = full;
+            session->uploadDamage = session->damage;
+            session->damage.clear();
+            session->damageFull = false;
             session->pendingNativeFrame = false;
             session->hasNativeFrameTime = true;
             session->lastNativeFrameTime = writeEnd;
@@ -302,6 +388,8 @@ static void FlushNativeFrame(Session* session)
     session->pendingNativeFrame = false;
     session->hasNativeFrameTime = true;
     session->lastNativeFrameTime = writeEnd;
+    session->damage.clear();
+    session->damageFull = false;
     ++session->version;
 }
 
@@ -485,11 +573,11 @@ static bool StartSession(Session* session, const std::string& host, uint32_t por
     freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
 
-    /* Graphics pipeline + H.264 via the bundled LGPL FFmpeg decoder. */
+    /* Graphics pipeline + H.264 via the OHOS native AVCodec (4:2:0 only). */
     freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, TRUE);
     freerdp_settings_set_bool(settings, FreeRDP_GfxH264, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, TRUE);
-    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444v2, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, FALSE);
+    freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444v2, FALSE);
     freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000);
     const uint32_t width = (desktopWidth >= 640 && desktopWidth <= 4096) ? desktopWidth : 1024;
     const uint32_t height = (desktopHeight >= 480 && desktopHeight <= 4096) ? desktopHeight : 768;
@@ -1016,6 +1104,8 @@ static napi_value SendMouseMove(napi_env env, napi_callback_info info)
 static std::atomic<float> g_xViewScale{ 1.0f };
 static std::atomic<float> g_xOffsetX{ 0.0f };
 static std::atomic<float> g_xOffsetY{ 0.0f };
+static std::atomic<float> g_xViewWidth{ 0.0f };
+static std::atomic<float> g_xViewHeight{ 0.0f };
 
 static GLuint CompileShader(GLenum type, const char* source)
 {
@@ -1132,7 +1222,7 @@ struct XTestRenderer {
         return prog;
     }
 
-    void UploadTexture(const uint8_t* data, int frameWidth, int frameHeight, uint64_t version)
+    void UploadFrame(Session* session, int frameWidth, int frameHeight)
     {
         if (!texture) {
             glGenTextures(1, &texture);
@@ -1143,17 +1233,31 @@ struct XTestRenderer {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        if (frameWidth != textureWidth || frameHeight != textureHeight) {
+        const bool full = session->uploadFull || textureWidth != frameWidth ||
+            textureHeight != frameHeight;
+        if (full) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, frameWidth, frameHeight, 0,
-                         GL_RGBA, GL_UNSIGNED_BYTE, data);
+                         GL_RGBA, GL_UNSIGNED_BYTE, session->pixels.data());
             textureWidth = frameWidth;
             textureHeight = frameHeight;
         } else {
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, frameWidth, frameHeight,
-                            GL_RGBA, GL_UNSIGNED_BYTE, data);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, frameWidth);
+            for (const DamageRect& rect : session->uploadDamage) {
+                const int rw = rect.right - rect.left;
+                const int rh = rect.bottom - rect.top;
+                if (rw <= 0 || rh <= 0)
+                    continue;
+                const uint8_t* src = session->pixels.data() +
+                    (static_cast<size_t>(rect.top) * frameWidth + rect.left) * 4;
+                glTexSubImage2D(GL_TEXTURE_2D, 0, rect.left, rect.top, rw, rh,
+                                GL_RGBA, GL_UNSIGNED_BYTE, src);
+            }
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         }
-        textureVersion = version;
+        textureVersion = session->version;
         g_xUploadedFrames.fetch_add(1);
+        session->uploadDamage.clear();
+        session->uploadFull = false;
     }
 
     void RenderLoop(void* window)
@@ -1238,7 +1342,7 @@ struct XTestRenderer {
                     frameHeight = session->height;
                     if (!session->pixels.empty() && session->version != textureVersion &&
                         frameWidth > 0 && frameHeight > 0) {
-                        UploadTexture(session->pixels.data(), frameWidth, frameHeight, session->version);
+                        UploadFrame(session, frameWidth, frameHeight);
                         uploaded = true;
                     }
                 }
@@ -1333,6 +1437,7 @@ static void OnXSurfaceCreated(OH_NativeXComponent* component, void* window)
             if (session) {
                 std::lock_guard<std::mutex> frameLock(session->mutex);
                 session->pendingNativeFrame = true;
+                session->damageFull = true;
                 session->hasNativeFrameTime = false;
             }
         }
@@ -1373,21 +1478,27 @@ static OH_NativeXComponent_Callback g_xComponentCallback = {
 
 static napi_value SetXViewTransform(napi_env env, napi_callback_info info)
 {
-    size_t argc = 3;
-    napi_value args[3] = {nullptr, nullptr, nullptr};
+    size_t argc = 5;
+    napi_value args[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     double scale = 1.0;
     double offsetX = 0.0;
     double offsetY = 0.0;
-    if (argc >= 3) {
+    double viewWidth = 0.0;
+    double viewHeight = 0.0;
+    if (argc >= 5) {
         napi_get_value_double(env, args[0], &scale);
         napi_get_value_double(env, args[1], &offsetX);
         napi_get_value_double(env, args[2], &offsetY);
+        napi_get_value_double(env, args[3], &viewWidth);
+        napi_get_value_double(env, args[4], &viewHeight);
     }
     if (scale <= 0.0) scale = 1.0;
     g_xViewScale.store(static_cast<float>(scale));
     g_xOffsetX.store(static_cast<float>(offsetX));
     g_xOffsetY.store(static_cast<float>(offsetY));
+    g_xViewWidth.store(static_cast<float>(viewWidth));
+    g_xViewHeight.store(static_cast<float>(viewHeight));
     napi_value result;
     napi_get_boolean(env, true, &result);
     return result;
@@ -1401,6 +1512,7 @@ static napi_value ForceXFrame(napi_env env, napi_callback_info info)
     if (session) {
         std::lock_guard<std::mutex> frameLock(session->mutex);
         session->pendingNativeFrame = true;
+        session->damageFull = true;
         session->hasNativeFrameTime = false;
     }
     napi_value result;

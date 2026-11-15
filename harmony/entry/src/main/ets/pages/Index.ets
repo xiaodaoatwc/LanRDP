@@ -1545,7 +1545,8 @@ struct Index {
   }
 
   private notifyXViewTransform(): void {
-    setXViewTransform(this.viewScale, this.viewOffsetX, this.viewOffsetY);
+    setXViewTransform(this.viewScale, this.viewOffsetX, this.viewOffsetY,
+      this.imageViewWidth, this.imageViewHeight);
   }
 
   private clampViewOffsets(): void {
