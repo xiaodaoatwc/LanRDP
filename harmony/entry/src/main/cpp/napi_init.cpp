@@ -120,6 +120,7 @@ static Session* SessionFromContext(rdpContext* context)
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
 static std::atomic<bool> g_xComponentActive{ false };
 static std::atomic<uint64_t> g_xRenderedFrames{ 0 };
+static std::atomic<uint64_t> g_xUploadedFrames{ 0 };
 
 static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
 {
@@ -1114,6 +1115,7 @@ struct XTestRenderer {
             std::memcpy(&sample, data + sampleOffset, sizeof(sample));
         }
         textureVersion = version;
+        g_xUploadedFrames.fetch_add(1);
         OH_LOG_Print(LOG_APP, LOG_INFO, 0xFF00, "LanRDPX",
             "texture %{public}dx%{public}d sample=%{public}08x", frameWidth, frameHeight, sample);
     }
@@ -1350,6 +1352,14 @@ static napi_value ForceXFrame(napi_env env, napi_callback_info info)
     return result;
 }
 
+static napi_value GetXUploadedFrames(napi_env env, napi_callback_info info)
+{
+    (void)info;
+    napi_value result;
+    napi_create_double(env, static_cast<double>(g_xUploadedFrames.load()), &result);
+    return result;
+}
+
 static napi_value GetXRenderFrames(napi_env env, napi_callback_info info)
 {
     (void)info;
@@ -1379,7 +1389,8 @@ static napi_value Init(napi_env env, napi_value exports)
         { "sendMouseMove", nullptr, SendMouseMove, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "setXViewTransform", nullptr, SetXViewTransform, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "forceXFrame", nullptr, ForceXFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "getXRenderFrames", nullptr, GetXRenderFrames, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "getXRenderFrames", nullptr, GetXRenderFrames, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "getXUploadedFrames", nullptr, GetXUploadedFrames, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     napi_value exportInstance = nullptr;

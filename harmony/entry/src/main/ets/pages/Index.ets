@@ -5,7 +5,7 @@ import { displaySync } from '@kit.ArkGraphics2D';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { ackFrame, bindFrameMaps, connect, forceXFrame, freerdpVersion, getFrame, getSessionInfo, getXRenderFrames, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, setXViewTransform, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
+import { ackFrame, bindFrameMaps, connect, forceXFrame, freerdpVersion, getFrame, getSessionInfo, getXUploadedFrames, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, setXViewTransform, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -1146,7 +1146,7 @@ struct Index {
   private async refreshFrame(): Promise<void> {
     if (this.showXTest) {
       const now = Date.now();
-      const frames = getXRenderFrames();
+      const frames = getXUploadedFrames();
       if (this.lastXFpsAt === 0) {
         this.lastXFpsAt = now;
         this.lastXFrameCount = frames;
@@ -1313,6 +1313,7 @@ struct Index {
   }
 
   private onSessionLost(error: string): void {
+    this.showXTest = false;
     if (!this.connected) {
       return;
     }
@@ -1880,6 +1881,7 @@ struct Index {
   }
 
   private disconnect(): void {
+    this.showXTest = false;
     this.exitFullscreen();
     this.disableNativeFrames();
     this.stopFrameTimer();

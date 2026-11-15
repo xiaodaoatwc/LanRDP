@@ -34,3 +34,4 @@ export const sendMouseMove: (x: number, y: number, button: number) => boolean;
 export const setXViewTransform: (scale: number, offsetX: number, offsetY: number) => boolean;
 export const forceXFrame: () => boolean;
 export const getXRenderFrames: () => number;
+export const getXUploadedFrames: () => number;
