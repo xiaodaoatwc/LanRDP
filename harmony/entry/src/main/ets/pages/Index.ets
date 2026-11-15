@@ -5,7 +5,7 @@ import { displaySync } from '@kit.ArkGraphics2D';
 import { preferences } from '@kit.ArkData';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
-import { ackFrame, bindFrameMaps, connect, freerdpVersion, getFrame, getSessionInfo, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, setXViewTransform, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
+import { ackFrame, bindFrameMaps, connect, forceXFrame, freerdpVersion, getFrame, getSessionInfo, getXRenderFrames, sendKey, sendMouse, sendMouseMove, sendUnicode, sendWheel, setXViewTransform, stopSession, unbindFrameMaps, version } from 'liblanrdp.so';
 
 interface ComboKey {
   code: number;
@@ -87,6 +87,8 @@ struct Index {
   @State private frameVersion: number = 0;
   @State private frameFps: number = 0;
   @State private targetFrameRate: number = 60;
+  private lastXFpsAt: number = 0;
+  private lastXFrameCount: number = 0;
   @State private isFullscreen: boolean = false;
   @State private showRemoteMenu: boolean = false;
   @State private showXTest: boolean = false;
@@ -1143,6 +1145,20 @@ struct Index {
 
   private async refreshFrame(): Promise<void> {
     if (this.showXTest) {
+      const now = Date.now();
+      const frames = getXRenderFrames();
+      if (this.lastXFpsAt === 0) {
+        this.lastXFpsAt = now;
+        this.lastXFrameCount = frames;
+      } else if (now - this.lastXFpsAt >= 1000) {
+        const elapsed = now - this.lastXFpsAt;
+        const delta = frames - this.lastXFrameCount;
+        const fps = Math.max(0, Math.round(delta * 1000 / elapsed));
+        this.frameFps = fps;
+        this.status = `X 预览 · ${this.frameWidth}×${this.frameHeight} · ${fps}fps`;
+        this.lastXFpsAt = now;
+        this.lastXFrameCount = frames;
+      }
       return;
     }
     if (this.isConnecting || this.frameBusy) {
@@ -2989,6 +3005,8 @@ struct Index {
             .layoutWeight(1)
             .onClick(() => {
               this.showXTest = !this.showXTest;
+              this.lastXFpsAt = 0;
+              this.lastXFrameCount = 0;
               this.notifyXViewTransform();
             })
           Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
@@ -3098,6 +3116,8 @@ struct Index {
               .fontSize(11)
               .onClick(() => {
                 this.showXTest = !this.showXTest;
+              this.lastXFpsAt = 0;
+              this.lastXFrameCount = 0;
               this.notifyXViewTransform();
               })
             Button(this.targetFrameRate === 60 ? '60帧' : '30帧')
@@ -3140,6 +3160,13 @@ struct Index {
               })
                 .width('100%')
                 .height('100%')
+                .backgroundColor('#F2F2F7')
+                .onLoad(() => {
+                  this.notifyXViewTransform();
+                  setTimeout(() => {
+                    forceXFrame();
+                  }, 50);
+                })
             }
           }
           .width('100%')

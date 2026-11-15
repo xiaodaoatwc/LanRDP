@@ -32,3 +32,5 @@ export const sendUnicode: (code: number, down: boolean) => boolean;
 export const sendKey: (code: number, down: boolean, extended: boolean) => boolean;
 export const sendMouseMove: (x: number, y: number, button: number) => boolean;
 export const setXViewTransform: (scale: number, offsetX: number, offsetY: number) => boolean;
+export const forceXFrame: () => boolean;
+export const getXRenderFrames: () => number;

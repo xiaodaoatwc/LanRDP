@@ -119,6 +119,7 @@ static Session* SessionFromContext(rdpContext* context)
 
 static std::atomic<uint64_t> g_connectGeneration{ 0 };
 static std::atomic<bool> g_xComponentActive{ false };
+static std::atomic<uint64_t> g_xRenderedFrames{ 0 };
 
 static void UnbindNativePixelMaps(Session* session, napi_env env = nullptr)
 {
@@ -1198,7 +1199,7 @@ struct XTestRenderer {
             }
 
             glViewport(0, 0, w, h);
-            glClearColor(0.02f, 0.02f, 0.03f, 1.0f);
+            glClearColor(242.0f / 255.0f, 242.0f / 255.0f, 247.0f / 255.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
             if (texture != 0 && textureWidth > 0 && textureHeight > 0) {
                 const float scale = g_xViewScale.load();
@@ -1244,6 +1245,7 @@ struct XTestRenderer {
             if (!eglSwapBuffers(display, surface)) {
                 break;
             }
+            g_xRenderedFrames.fetch_add(1);
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
 
@@ -1334,6 +1336,29 @@ static napi_value SetXViewTransform(napi_env env, napi_callback_info info)
     return result;
 }
 
+static napi_value ForceXFrame(napi_env env, napi_callback_info info)
+{
+    (void)info;
+    std::lock_guard<std::mutex> lock(g_sessionMutex);
+    Session* session = g_session;
+    if (session) {
+        std::lock_guard<std::mutex> frameLock(session->mutex);
+        session->pendingNativeFrame = true;
+        session->hasNativeFrameTime = false;
+    }
+    napi_value result;
+    napi_get_boolean(env, session != nullptr, &result);
+    return result;
+}
+
+static napi_value GetXRenderFrames(napi_env env, napi_callback_info info)
+{
+    (void)info;
+    napi_value result;
+    napi_create_double(env, static_cast<double>(g_xRenderedFrames.load()), &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports)
 {
@@ -1353,7 +1378,9 @@ static napi_value Init(napi_env env, napi_value exports)
         { "sendUnicode", nullptr, SendUnicode, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendKey", nullptr, SendKey, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendMouseMove", nullptr, SendMouseMove, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "setXViewTransform", nullptr, SetXViewTransform, nullptr, nullptr, nullptr, napi_default, nullptr }
+        { "setXViewTransform", nullptr, SetXViewTransform, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "forceXFrame", nullptr, ForceXFrame, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "getXRenderFrames", nullptr, GetXRenderFrames, nullptr, nullptr, nullptr, napi_default, nullptr }
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     napi_value exportInstance = nullptr;
