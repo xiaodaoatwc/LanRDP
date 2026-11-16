@@ -5,7 +5,7 @@
 #   ./scripts/ffmpeg-lgpl.sh [arm64|x86_64]
 #
 # - 不启用 --enable-gpl / --enable-nonfree，因此产物是 LGPL-2.1+；
-# - App 的 H.264 解码由系统后端（macOS VideoToolbox / OHOS AVCodec）提供，
+# - App 的 H.264 解码由系统的 VideoToolbox 提供，
 #   这里只构建 swscale/swresample（图像缩放），**不包含任何 H.264 编解码实现**；
 # - 仅构建共享库（动态链接），不做静态链接。
 #

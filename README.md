@@ -10,7 +10,6 @@
 
 - H.264 解码只使用系统 VideoToolbox（显式请求硬件解码），App 不再分发 H.264 解码实现。
 - 渲染优化：合并脏矩形，窗口视频的纹理上传耗时约下降 40%；present 也只在有待处理更新时合并。
-- HarmonyOS 端使用系统 AVCodec 硬解（见 harmony 工作区）。
 
 ## 1.14.2 更新 / What's New
 
@@ -269,7 +268,6 @@ DMG 根目录只放 `LanRDP.app` 和 `Applications` 快捷方式，许可证和�
 LanRDP **不随包分发任何 H.264 解码实现**：
 
 - macOS：H.264 由系统 **VideoToolbox** 解码；
-- HarmonyOS：H.264 由系统 **AVCodec**（硬件解码）解码；
 - 随 App 分发的 FFmpeg 只保留 **swscale/swresample**（图像缩放/重采样），不含 H.264 编解码器；
 - H.264 专利许可由操作系统厂商承担；LanRDP 自身只调用系统接口。
 
