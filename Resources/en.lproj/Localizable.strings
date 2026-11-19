@@ -269,3 +269,19 @@
 /* HiDPI logical rendering */
 "HiDPI（按逻辑分辨率显示）" = "HiDPI (render at logical size)";
 "按 macOS 逻辑分辨率运行远程桌面：全屏使用屏幕的可见逻辑尺寸（例如 1710×1068），窗口/固定使用下面填的宽高（单位是点），再由客户端放大铺满。Windows 里的截图和显示设置就是这些逻辑分辨率，界面大小与 macOS 一致。" = "Runs the remote desktop at the macOS logical resolution: fullscreen uses the screen visible logical size (e.g. 1710x1068), window/fixed use the width/height below (in points), and the client scales it up. Screenshots and display settings inside Windows show that logical resolution, matching macOS UI size.";
+
+/* Certificate policy */
+"询问（不信任时警告）" = "Ask (warn on untrusted)";
+"忽略证书错误（不提示）" = "Ignore certificate errors (no prompt)";
+"连接时校验证书；如果证书不受信任或发生变化，会弹出警告，由你决定是否继续。" = "Verifies the certificate; if it is untrusted or changed, a warning lets you decide whether to continue.";
+
+/* Certificate prompt */
+"远程计算机的证书已更改" = "The remote computer's certificate has changed";
+"无法验证远程计算机的证书" = "Cannot verify the remote computer's certificate";
+"接受并连接" = "Accept and connect";
+"主题：" = "Subject: ";
+"颁发者：" = "Issuer: ";
+"指纹：" = "Fingerprint: ";
+"之前的证书：" = "Previous certificate:";
+"证书与上次连接时不一致，可能被篡改。请确认这是预期的改动。" = "The certificate differs from the previous connection and may have been tampered with. Confirm this change is expected.";
+"无法验证该证书（可能是自签名证书）。只有在信任这台计算机时才应继续。" = "This certificate cannot be verified (it may be self-signed). Continue only if you trust this computer.";

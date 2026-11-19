@@ -109,6 +109,14 @@ enum RDPLauncher {
         args.append("/from-stdin:force")
 
         switch pc.certificatePolicy {
+        case .ask:
+            if let fp = pc.acceptedFingerprint, !fp.isEmpty {
+                // FreeRDP expects /cert:fingerprint:<hash>:<fingerprint>; the
+                // callback reports a SHA-256 fingerprint.
+                args.append("/cert:fingerprint:sha256:\(fp)")
+            }
+            // Otherwise no /cert argument: FreeRDP verifies and asks the app to
+            // prompt for untrusted/changed certificates.
         case .tofu: args.append("/cert:tofu")
         case .ignore: args.append("/cert:ignore")
         case .deny: args.append("/cert:deny")
@@ -162,12 +170,9 @@ enum RDPLauncher {
             }
         }
 
-        if hiDPI {
-            // The session already runs at the logical size, so Windows should use
-            // 100% DPI: the UI then has the same physical size as macOS.
-            args.append("/scale:100")
-        } else {
-            switch pc.scaling {
+        // The DPI scale applies to every mode, including the logical-resolution
+        // (HiDPI) one: the session resolution stays logical, Windows scales the UI.
+        switch pc.scaling {
             case 100:
                 // Explicitly force 100% DPI; otherwise an RDS/Windows host may
                 // keep its own 150%/200% scaling and show oversized icons.
@@ -180,12 +185,11 @@ enum RDPLauncher {
                 // device factor only has 100/140/180, so use the nearest.
                 args.append("/scale-desktop:\(pc.scaling)")
                 args.append("/scale-device:140")
-            case 175, 200:
-                args.append("/scale-desktop:\(pc.scaling)")
-                args.append("/scale-device:180")
-            default:
-                break
-            }
+        case 175, 200:
+            args.append("/scale-desktop:\(pc.scaling)")
+            args.append("/scale-device:180")
+        default:
+            break
         }
 
         args.append(pc.clipboard ? "/clipboard" : "-clipboard")

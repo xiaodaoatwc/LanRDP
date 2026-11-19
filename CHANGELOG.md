@@ -3,6 +3,32 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.5 — 2026-11-19
+
+### 中文
+
+- 新增证书策略「询问（不信任时警告）」（默认）：证书不受信任或发生变化时由 App 弹出原生警告，
+  接受后保存指纹、自动重连，之后不再询问；证书变化会再次询问。
+- 删除电脑时一并清除该主机的证书缓存；「清除证书缓存」同时清除已保存的指纹。
+- 证书警告跟随 App 语言（中文 / English）。
+- 修复拖动改变窗口大小时远程分辨率不跟随（窗口被拉回初始尺寸）。
+- 修复退出全屏后窗口没有恢复原尺寸、远程分辨率不变。
+- 修复 HiDPI 模式下缩放设置（100% / 125% / 140% …）被强制为 100% 而不生效。
+- 新建电脑默认全屏 + HiDPI + 跟随屏幕分辨率；从分组内添加电脑时自动选中该分组。
+
+### English
+
+- New certificate policy "Ask (warn when untrusted)" (default): the app shows a native warning for
+  untrusted or changed certificates; accepting stores the fingerprint and reconnects automatically,
+  and later connections no longer prompt. A changed certificate prompts again.
+- Deleting a PC also removes that host's stored certificate; "Clear certificate cache" now also
+  clears the saved fingerprint.
+- The certificate warning follows the app language (Chinese / English).
+- Fixed the remote resolution not following window resizes (the window was reset to its initial size).
+- Fixed leaving fullscreen not restoring the window size and not updating the remote resolution.
+- Fixed the scaling setting (100% / 125% / 140% …) being forced to 100% in HiDPI mode.
+- New PCs default to fullscreen + HiDPI + follow-screen; adding a PC from a group preselects it.
+
 ## 1.14.4 — 2026-11-19
 
 ### 中文

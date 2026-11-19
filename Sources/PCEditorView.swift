@@ -20,12 +20,14 @@ struct PCEditorView: View {
     @State private var showNewCredential = false
     @State private var didApplyDefaults = false
 
-    init(mode: Mode, onSave: @escaping (PC) -> Void) {
+    init(mode: Mode, defaultGroupID: UUID? = nil, onSave: @escaping (PC) -> Void) {
         self.mode = mode
         self.onSave = onSave
         switch mode {
         case .add:
-            _draft = State(initialValue: PC())
+            var pc = PC()
+            pc.groupID = defaultGroupID
+            _draft = State(initialValue: pc)
         case .edit(let pc):
             _draft = State(initialValue: pc)
         }
@@ -368,6 +370,9 @@ struct PCEditorView: View {
     }
 
     private func clearCertificateCache() {
+        // Also forget the fingerprint remembered by the app for the "ask" policy,
+        // otherwise the next connect silently accepts the old certificate.
+        draft.acceptedFingerprint = nil
         let url = RDPLauncher.savedCertificateURL(for: draft)
         if FileManager.default.fileExists(atPath: url.path) {
             do {

@@ -1,0 +1,472 @@
+diff -ruN a/client/SDL/SDL3/dialogs/sdl_dialogs.cpp b/client/SDL/SDL3/dialogs/sdl_dialogs.cpp
+--- a/client/SDL/SDL3/dialogs/sdl_dialogs.cpp	2026-11-19 23:16:46
++++ b/client/SDL/SDL3/dialogs/sdl_dialogs.cpp	2026-11-19 23:16:46
+@@ -42,6 +42,58 @@
+ 	SHOW_DIALOG_TIMED_ACCEPT = 2
+ };
+ 
++#if defined(__APPLE__)
++extern "C"
++{
++	void* objc_getClass(const char* name);
++	void* sel_registerName(const char* name);
++	void* objc_msgSend(void* self, void* op, ...);
++}
++
++static void lanrdp_activate_app(void)
++{
++	void* app = ((void* (*)(void*, void*))objc_msgSend)(objc_getClass("NSApplication"),
++	                                                    sel_registerName("sharedApplication"));
++	if (app)
++		((void (*)(void*, void*, signed char))objc_msgSend)(
++		    app, sel_registerName("activateIgnoringOtherApps:"), 1);
++}
++#else
++static void lanrdp_activate_app(void)
++{
++}
++#endif
++
++static void lanrdp_write_cert_prompt(const char* path, const char* host, UINT16 port,
++                                     const char* common_name, const char* subject,
++                                     const char* issuer, const char* fingerprint,
++                                     const char* old_subject, const char* old_issuer,
++                                     const char* old_fingerprint, BOOL changed)
++{
++	if (!path || !*path)
++		return;
++	FILE* fp = fopen(path, "w");
++	if (!fp)
++		return;
++	fprintf(fp, "host=%s\n", host ? host : "");
++	fprintf(fp, "port=%u\n", port);
++	fprintf(fp, "type=%s\n", changed ? "changed" : "new");
++	fprintf(fp, "common_name=%s\n", common_name ? common_name : "");
++	fprintf(fp, "subject=%s\n", subject ? subject : "");
++	fprintf(fp, "issuer=%s\n", issuer ? issuer : "");
++	fprintf(fp, "fingerprint=%s\n", fingerprint ? fingerprint : "");
++	fprintf(fp, "old_subject=%s\n", old_subject ? old_subject : "");
++	fprintf(fp, "old_issuer=%s\n", old_issuer ? old_issuer : "");
++	fprintf(fp, "old_fingerprint=%s\n", old_fingerprint ? old_fingerprint : "");
++	fclose(fp);
++}
++
++static BOOL sdl_lang_zh(void)
++{
++	const char* lang = getenv("LANRDP_LANG");
++	return lang && (strncmp(lang, "zh", 2) == 0);
++}
++
+ static const char* type_str_for_flags(UINT32 flags)
+ {
+ 	const char* type = "RDP-Server";
+@@ -351,11 +403,18 @@
+ 
+ 	char* str = nullptr;
+ 	size_t slen = 0;
+-	winpr_asprintf(&str, &slen,
+-	               "Valid from:  %s\n"
+-	               "Valid to:    %s\n"
+-	               "Thumbprint:  %s\n",
+-	               start, end, fp);
++	if (sdl_lang_zh())
++		winpr_asprintf(&str, &slen,
++		               "有效期自：  %s\n"
++		               "有效期至：  %s\n"
++		               "指纹：      %s\n",
++		               start, end, fp);
++	else
++		winpr_asprintf(&str, &slen,
++		               "Valid from:  %s\n"
++		               "Valid to:    %s\n"
++		               "Thumbprint:  %s\n",
++		               start, end, fp);
+ 	free(fp);
+ 	free(start);
+ 	free(end);
+@@ -374,6 +433,45 @@
+ 	WINPR_ASSERT(instance->context);
+ 	WINPR_ASSERT(instance->context->settings);
+ 
++	/* LanRDP: see sdl_verify_certificate_ex. */
++	const char* certFile = getenv("LANRDP_CERT_FILE");
++	if (certFile && *certFile)
++	{
++		char* pemFp = nullptr;
++		char* oldPemFp = nullptr;
++		const char* fp = new_fingerprint;
++		const char* oldFp = old_fingerprint;
++		if (flags & VERIFY_CERT_FLAG_FP_IS_PEM)
++		{
++			rdpCertificate* c = freerdp_certificate_new_from_pem(new_fingerprint);
++			if (c)
++			{
++				pemFp = freerdp_certificate_get_fingerprint(c);
++				fp = pemFp;
++				freerdp_certificate_free(c);
++			}
++			else
++				fp = "";
++			if (old_fingerprint)
++			{
++				rdpCertificate* oc = freerdp_certificate_new_from_pem(old_fingerprint);
++				if (oc)
++				{
++					oldPemFp = freerdp_certificate_get_fingerprint(oc);
++					oldFp = oldPemFp;
++					freerdp_certificate_free(oc);
++				}
++				else
++					oldFp = "";
++			}
++		}
++		lanrdp_write_cert_prompt(certFile, host, port, common_name, subject, issuer, fp,
++		                         old_subject, old_issuer, oldFp, TRUE);
++		free(pemFp);
++		free(oldPemFp);
++		return 0;
++	}
++
+ 	/* Newer versions of FreeRDP allow exposing the whole PEM by setting
+ 	 * FreeRDP_CertificateCallbackPreferPEM to TRUE
+ 	 */
+@@ -394,41 +492,67 @@
+ 	else
+ 		winpr_asprintf(&old_fp_str, &olen, "Thumbprint:  %s\n", old_fingerprint);
+ 
++	const BOOL zh = sdl_lang_zh();
+ 	const char* collission_str = "";
+ 	if (flags & VERIFY_CERT_FLAG_MATCH_LEGACY_SHA1)
+ 	{
+-		collission_str =
+-		    "A matching entry with legacy SHA1 was found in local known_hosts2 store.\n"
+-		    "If you just upgraded from a FreeRDP version before 2.0 this is expected.\n"
+-		    "The hashing algorithm has been upgraded from SHA1 to SHA256.\n"
+-		    "All manually accepted certificates must be reconfirmed!\n"
+-		    "\n";
++		collission_str = zh
++		    ? "在本地 known_hosts2 中找到了旧的 SHA1 记录。\n"
++		      "如果刚从 FreeRDP 2.0 之前的版本升级，这是正常的。\n"
++		      "哈希算法已从 SHA1 升级为 SHA256，\n"
++		      "需要重新确认所有手动接受过的证书。\n"
++		      "\n"
++		    : "A matching entry with legacy SHA1 was found in local known_hosts2 store.\n"
++		      "If you just upgraded from a FreeRDP version before 2.0 this is expected.\n"
++		      "The hashing algorithm has been upgraded from SHA1 to SHA256.\n"
++		      "All manually accepted certificates must be reconfirmed!\n"
++		      "\n";
+ 	}
+ 
+ 	char* title = nullptr;
+ 	size_t tlen = 0;
+-	winpr_asprintf(&title, &tlen, "Certificate for %s:%" PRIu16 " (%s) has changed", host, port,
+-	               type);
++	if (zh)
++		winpr_asprintf(&title, &tlen, "证书已更改：%s:%" PRIu16 " (%s)", host, port, type);
++	else
++		winpr_asprintf(&title, &tlen, "Certificate for %s:%" PRIu16 " (%s) has changed", host,
++		               port, type);
+ 
+ 	char* message = nullptr;
+ 	size_t mlen = 0;
+-	winpr_asprintf(&message, &mlen,
+-	               "New Certificate details:\n"
+-	               "Common Name: %s\n"
+-	               "Subject:     %s\n"
+-	               "Issuer:      %s\n"
+-	               "%s\n"
+-	               "Old Certificate details:\n"
+-	               "Subject:     %s\n"
+-	               "Issuer:      %s\n"
+-	               "%s\n"
+-	               "%s\n"
+-	               "The above X.509 certificate does not match the certificate used for previous "
+-	               "connections.\n"
+-	               "This may indicate that the certificate has been tampered with.\n"
+-	               "Please contact the administrator of the RDP server and clarify.\n",
+-	               common_name, subject, issuer, new_fp_str, old_subject, old_issuer, old_fp_str,
+-	               collission_str);
++	if (zh)
++		winpr_asprintf(&message, &mlen,
++		               "新证书详情：\n"
++		               "通用名称：%s\n"
++		               "主题：    %s\n"
++		               "颁发者：  %s\n"
++		               "%s\n"
++		               "旧证书详情：\n"
++		               "主题：    %s\n"
++		               "颁发者：  %s\n"
++		               "%s\n"
++		               "%s\n"
++		               "上面的 X.509 证书与之前连接时使用的不一致。\n"
++		               "这可能意味着证书被篡改，请联系 RDP 服务器的管理员确认。\n",
++		               common_name, subject, issuer, new_fp_str, old_subject, old_issuer,
++		               old_fp_str, collission_str);
++	else
++		winpr_asprintf(&message, &mlen,
++		               "New Certificate details:\n"
++		               "Common Name: %s\n"
++		               "Subject:     %s\n"
++		               "Issuer:      %s\n"
++		               "%s\n"
++		               "Old Certificate details:\n"
++		               "Subject:     %s\n"
++		               "Issuer:      %s\n"
++		               "%s\n"
++		               "%s\n"
++		               "The above X.509 certificate does not match the certificate used for previous "
++		               "connections.\n"
++		               "This may indicate that the certificate has been tampered with.\n"
++		               "Please contact the administrator of the RDP server and clarify.\n",
++		               common_name, subject, issuer, new_fp_str, old_subject, old_issuer,
++		               old_fp_str, collission_str);
+ 
+ 	const DWORD rc = sdl_show_ceritifcate_dialog(instance->context, title, message);
+ 	free(title);
+@@ -444,7 +568,33 @@
+                                 const char* fingerprint, DWORD flags)
+ {
+ 	const char* type = type_str_for_flags(flags);
++	const BOOL zh = sdl_lang_zh();
+ 
++	/* LanRDP: let the main app show the certificate prompt (it can bring itself
++	 * to the front reliably). The connection is aborted; the app reconnects with
++	 * /cert:fingerprint once the user accepts. */
++	const char* certFile = getenv("LANRDP_CERT_FILE");
++	if (certFile && *certFile)
++	{
++		char* pemFp = nullptr;
++		const char* fp = fingerprint;
++		if (flags & VERIFY_CERT_FLAG_FP_IS_PEM)
++		{
++			rdpCertificate* c = freerdp_certificate_new_from_pem(fingerprint);
++			if (c)
++			{
++				pemFp = freerdp_certificate_get_fingerprint(c);
++				fp = pemFp;
++			}
++			else
++				fp = "";
++		}
++		lanrdp_write_cert_prompt(certFile, host, port, common_name, subject, issuer, fp, nullptr,
++		                         nullptr, nullptr, FALSE);
++		free(pemFp);
++		return 0;
++	}
++
+ 	/* Newer versions of FreeRDP allow exposing the whole PEM by setting
+ 	 * FreeRDP_CertificateCallbackPreferPEM to TRUE
+ 	 */
+@@ -457,20 +607,34 @@
+ 
+ 	char* title = nullptr;
+ 	size_t tlen = 0;
+-	winpr_asprintf(&title, &tlen, "New certificate for %s:%" PRIu16 " (%s)", host, port, type);
++	if (zh)
++		winpr_asprintf(&title, &tlen, "新证书：%s:%" PRIu16 " (%s)", host, port, type);
++	else
++		winpr_asprintf(&title, &tlen, "New certificate for %s:%" PRIu16 " (%s)", host, port,
++		               type);
+ 
+ 	char* message = nullptr;
+ 	size_t mlen = 0;
+-	winpr_asprintf(
+-	    &message, &mlen,
+-	    "Common Name: %s\n"
+-	    "Subject:     %s\n"
+-	    "Issuer:      %s\n"
+-	    "%s\n"
+-	    "The above X.509 certificate could not be verified, possibly because you do not have\n"
+-	    "the CA certificate in your certificate store, or the certificate has expired.\n"
+-	    "Please look at the OpenSSL documentation on how to add a private CA to the store.\n",
+-	    common_name, subject, issuer, fp_str);
++	if (zh)
++		winpr_asprintf(&message, &mlen,
++		               "通用名称：%s\n"
++		               "主题：    %s\n"
++		               "颁发者：  %s\n"
++		               "%s\n"
++		               "无法验证上面的 X.509 证书，可能是证书已过期，\n"
++		               "或本机没有对应的 CA 证书。\n",
++		               common_name, subject, issuer, fp_str);
++	else
++		winpr_asprintf(
++		    &message, &mlen,
++		    "Common Name: %s\n"
++		    "Subject:     %s\n"
++		    "Issuer:      %s\n"
++		    "%s\n"
++		    "The above X.509 certificate could not be verified, possibly because you do not have\n"
++		    "the CA certificate in your certificate store, or the certificate has expired.\n"
++		    "Please look at the OpenSSL documentation on how to add a private CA to the store.\n",
++		    common_name, subject, issuer, fp_str);
+ 
+ 	const DWORD rc = sdl_show_ceritifcate_dialog(instance->context, title, message);
+ 	free(fp_str);
+@@ -479,9 +643,10 @@
+ 	return rc;
+ }
+ 
+-BOOL sdl_cert_dialog_show(const char* title, const char* message)
++BOOL sdl_cert_dialog_show(const char* title, const char* message, SDL_Window* parent)
+ {
+ 	int buttonid = -1;
++	const BOOL zh = sdl_lang_zh();
+ 	enum
+ 	{
+ 		BUTTONID_CERT_ACCEPT_PERMANENT = 23,
+@@ -489,13 +654,18 @@
+ 		BUTTONID_CERT_DENY = 25
+ 	};
+ 	const SDL_MessageBoxButtonData buttons[] = {
+-		{ 0, BUTTONID_CERT_ACCEPT_PERMANENT, "permanent" },
+-		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, BUTTONID_CERT_ACCEPT_TEMPORARY, "temporary" },
+-		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, BUTTONID_CERT_DENY, "cancel" }
++		{ 0, BUTTONID_CERT_ACCEPT_PERMANENT, zh ? "永久接受" : "permanent" },
++		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, BUTTONID_CERT_ACCEPT_TEMPORARY,
++		  zh ? "仅本次" : "temporary" },
++		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, BUTTONID_CERT_DENY,
++		  zh ? "取消" : "cancel" }
+ 	};
+ 
+-	const SDL_MessageBoxData data = { SDL_MESSAGEBOX_WARNING, nullptr, title,  message,
++	lanrdp_activate_app();
++	const SDL_MessageBoxData data = { SDL_MESSAGEBOX_WARNING, parent, title,   message,
+ 		                              ARRAYSIZE(buttons),     buttons, nullptr };
++	if (parent)
++		SDL_RaiseWindow(parent);
+ 	const int rc = SDL_ShowMessageBox(&data, &buttonid);
+ 
+ 	Sint32 value = -1;
+diff -ruN a/client/SDL/SDL3/dialogs/sdl_dialogs.hpp b/client/SDL/SDL3/dialogs/sdl_dialogs.hpp
+--- a/client/SDL/SDL3/dialogs/sdl_dialogs.hpp	2026-11-19 23:16:46
++++ b/client/SDL/SDL3/dialogs/sdl_dialogs.hpp	2026-11-19 23:16:46
+@@ -51,7 +51,8 @@
+                                                size_t length, const WCHAR* message);
+ 
+ [[nodiscard]] BOOL sdl_message_dialog_show(const char* title, const char* message, Sint32 flags);
+-[[nodiscard]] BOOL sdl_cert_dialog_show(const char* title, const char* message);
++[[nodiscard]] BOOL sdl_cert_dialog_show(const char* title, const char* message,
++                                       SDL_Window* parent);
+ [[nodiscard]] BOOL sdl_scard_dialog_show(const char* title, Sint32 count, const char** list);
+ [[nodiscard]] BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args);
+ 
+diff -ruN a/client/SDL/SDL3/sdl_context.cpp b/client/SDL/SDL3/sdl_context.cpp
+--- a/client/SDL/SDL3/sdl_context.cpp	2026-11-19 23:16:46
++++ b/client/SDL/SDL3/sdl_context.cpp	2026-11-19 23:16:46
+@@ -1897,6 +1897,11 @@
+ {
+ 	if (freerdp_settings_get_bool(context()->settings, FreeRDP_SmartSizing))
+ 		return true;
++	/* With dynamic resolution the window size is user controlled; resizing it back
++	 * to the initial size on every pixel-size event would undo the user's resize
++	 * and bounce the session resolution back. */
++	if (freerdp_settings_get_bool(context()->settings, FreeRDP_DynamicResolutionUpdate))
++		return true;
+ 	if (!useLocalScale())
+ 		return true;
+ 	if (!window)
+diff -ruN a/client/SDL/SDL3/sdl_disp.cpp b/client/SDL/SDL3/sdl_disp.cpp
+--- a/client/SDL/SDL3/sdl_disp.cpp	2026-11-19 23:16:46
++++ b/client/SDL/SDL3/sdl_disp.cpp	2026-11-19 23:16:46
+@@ -68,7 +68,31 @@
+ }
+ 
+ 
++Uint32 SDLCALL sdlDispContext::OnPoll(void* param, SDL_TimerID timerID, Uint32 interval)
++{
++	WINPR_UNUSED(timerID);
++	auto* ctx = static_cast<sdlDispContext*>(param);
++	if (!ctx || !ctx->_sdl || !ctx->_disp || !ctx->_activated)
++		return interval;
+ 
++	auto settings = ctx->_sdl->context()->settings;
++	if (!settings)
++		return interval;
++	if (!freerdp_settings_get_bool(settings, FreeRDP_DynamicResolutionUpdate))
++		return interval;
++
++	auto* win = ctx->_sdl->getFirstWindow();
++	if (!win)
++		return interval;
++
++	if (!ctx->_sdl->updateWindow(win->id()))
++		return interval;
++	if (!ctx->_sdl->updateWindowList())
++		return interval;
++	(void)ctx->sendResize();
++	return interval;
++}
++
+ bool sdlDispContext::sendResize()
+ {
+ 	auto settings = _sdl->context()->settings;
+@@ -418,8 +442,8 @@
+ 		case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+ 			return updateMonitor(ev.windowID);
+ 		case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+-			/* LanRDP: handle native macOS fullscreen exit as well. */
+-			window->fitToUsableBounds();
++			/* Let SDL restore the pre-fullscreen window size; the poll timer then
++			 * reports it to the server so the session resolution follows. */
+ 			return updateMonitor(ev.windowID);
+ 
+ 		case SDL_EVENT_WINDOW_EXPOSED:
+@@ -474,6 +498,11 @@
+ 	         maxNumMonitors, maxMonitorAreaFactorA, maxMonitorAreaFactorB);
+ 	_activated = true;
+ 
++	/* LanRDP: a fullscreen window (especially on macOS) may not produce resize
++	 * events when the system display mode changes, so poll the window size. */
++	if (_pollTimer == 0)
++		_pollTimer = SDL_AddTimer(1000, sdlDispContext::OnPoll, this);
++
+ 	/* A new display channel means a new server instance, e.g. after a server redirection (GNOME
+ 	 * Remote Desktop hands the connection over from the login screen to the user session). It
+ 	 * does not know the layout sent to the previous instance, and the window size did not change,
+@@ -526,6 +555,11 @@
+ 		return false;
+ 
+ 	_disp = nullptr;
++	if (_pollTimer != 0)
++	{
++		SDL_RemoveTimer(_pollTimer);
++		_pollTimer = 0;
++	}
+ 	return _sdl->setResizeable(false);
+ }
+ 
+diff -ruN a/client/SDL/SDL3/sdl_disp.hpp b/client/SDL/SDL3/sdl_disp.hpp
+--- a/client/SDL/SDL3/sdl_disp.hpp	2026-11-19 23:16:46
++++ b/client/SDL/SDL3/sdl_disp.hpp	2026-11-19 23:16:46
+@@ -66,6 +66,7 @@
+ 	static void OnActivated(void* context, const ActivatedEventArgs* e);
+ 	static void OnGraphicsReset(void* context, const GraphicsResetEventArgs* e);
+ 	[[nodiscard]] static Uint32 SDLCALL OnTimer(void* param, SDL_TimerID timerID, Uint32 interval);
++	[[nodiscard]] static Uint32 SDLCALL OnPoll(void* param, SDL_TimerID timerID, Uint32 interval);
+ 
+ 	SdlContext* _sdl = nullptr;
+ 	DispClientContext* _disp = nullptr;
+@@ -73,6 +74,7 @@
+ 	bool _activated = false;
+ 	bool _waitingResize = false;
+ 	SDL_TimerID _timer = 0;
++	SDL_TimerID _pollTimer = 0;
+ 	unsigned _timer_retries = 0;
+ 	std::vector<DISPLAY_CONTROL_MONITOR_LAYOUT> _last_sent_layout;
+ };
+diff -ruN a/client/SDL/SDL3/sdl_freerdp.cpp b/client/SDL/SDL3/sdl_freerdp.cpp
+--- a/client/SDL/SDL3/sdl_freerdp.cpp	2026-11-19 23:16:46
++++ b/client/SDL/SDL3/sdl_freerdp.cpp	2026-11-19 23:16:46
+@@ -204,7 +204,10 @@
+ 						SDLConnectionDialogHider hider(sdl);
+ 						auto title = static_cast<const char*>(windowEvent.user.data1);
+ 						auto msg = static_cast<const char*>(windowEvent.user.data2);
+-						if (!sdl_cert_dialog_show(title, msg))
++						/* No parent window: the session window is still hidden while
++						 * the certificate is verified, and a sheet attached to it would
++						 * never become visible. */
++						if (!sdl_cert_dialog_show(title, msg, nullptr))
+ 							throw ErrorMsg{ -1, windowEvent.type, "sdl_cert_dialog_show" };
+ 					}
+ 					break;

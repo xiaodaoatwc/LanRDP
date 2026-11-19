@@ -11,6 +11,12 @@ struct ContentView: View {
     @State private var deletingGroup: PCGroup?
     @State private var selectedPCID: UUID?
 
+    /// Group preselected in the sidebar when adding a new PC.
+    private var addPCGroupID: UUID? {
+        if case .group(let id) = selection { return id }
+        return nil
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(
@@ -55,7 +61,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showAddPC) {
-            PCEditorView(mode: .add) { pc in
+            PCEditorView(mode: .add, defaultGroupID: addPCGroupID) { pc in
                 store.addPC(pc)
             }
         }

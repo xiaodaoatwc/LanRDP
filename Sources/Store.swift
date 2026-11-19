@@ -18,6 +18,22 @@ final class Store: ObservableObject {
     @Published var probingPCIDs: Set<UUID> = []
     @Published var lastError: AppAlert?
     @Published var pendingPassword: PasswordPrompt?
+    @Published var certPrompt: CertPrompt?
+
+    struct CertPrompt: Identifiable {
+        let id = UUID()
+        let pcID: UUID
+        let pcName: String
+        let host: String
+        let port: Int
+        let subject: String
+        let issuer: String
+        let fingerprint: String
+        let changed: Bool
+        let oldSubject: String
+        let oldIssuer: String
+        let oldFingerprint: String
+    }
 
     private let configDirectory: URL
     private let logsDirectory: URL
@@ -31,6 +47,7 @@ final class Store: ObservableObject {
     private var failureHandled: Set<UUID> = []
     private var ignoredExitIDs: Set<UUID> = []
     private var askpassArtifacts: [UUID: AskpassArtifacts] = [:]
+    private var launchCredentials: [UUID: (username: String, domain: String, password: String, quality: QualityPreset)] = [:]
     private var passwordCache: [UUID: String] = [:]
     private lazy var passwordVault = PasswordVault(
         url: configDirectory.appendingPathComponent("passwords-fallback.json")
@@ -263,6 +280,9 @@ final class Store: ObservableObject {
         activeSessionIDs.remove(pc.id)
         passwordVault.deletePassword(for: pc.id)
         Keychain.deletePassword(for: pc.id, service: Keychain.pcService)
+        // Forget the accepted certificate as well, like removing a connection in
+        // Microsoft Remote Desktop.
+        try? FileManager.default.removeItem(at: RDPLauncher.savedCertificateURL(for: pc))
         pcs.removeAll { $0.id == pc.id }
     }
 
@@ -277,6 +297,12 @@ final class Store: ObservableObject {
     }
 
     func clearCertificate(for pc: PC) {
+        // Also forget the fingerprint the app remembered for the "ask" policy.
+        if let index = pcs.firstIndex(where: { $0.id == pc.id }),
+           pcs[index].acceptedFingerprint != nil
+        {
+            pcs[index].acceptedFingerprint = nil
+        }
         let url = RDPLauncher.savedCertificateURL(for: pc)
         do {
             try FileManager.default.removeItem(at: url)
@@ -380,6 +406,109 @@ final class Store: ObservableObject {
         passwordCache.removeValue(forKey: pc.id)
         passwordVault.deletePassword(for: pc.id)
         Keychain.deletePassword(for: pc.id, service: Keychain.pcService)
+    }
+
+    // MARK: - Certificate prompt
+
+    private func readCertPrompt(pcID: UUID, displayName: String) -> CertPrompt? {
+        let file = logsDirectory.appendingPathComponent("\(pcID.uuidString).cert")
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        try? FileManager.default.removeItem(at: file)
+
+        var values: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            guard let idx = line.firstIndex(of: "=") else { continue }
+            values[String(line[..<idx])] = String(line[line.index(after: idx)...])
+        }
+        let port = Int(values["port"] ?? "") ?? 3389
+        let host = values["host"] ?? ""
+        let name = displayName.isEmpty ? host : displayName
+        return CertPrompt(
+            pcID: pcID,
+            pcName: name,
+            host: host,
+            port: port,
+            subject: values["subject"] ?? "",
+            issuer: values["issuer"] ?? "",
+            fingerprint: values["fingerprint"] ?? "",
+            changed: (values["type"] ?? "") == "changed",
+            oldSubject: values["old_subject"] ?? "",
+            oldIssuer: values["old_issuer"] ?? "",
+            oldFingerprint: values["old_fingerprint"] ?? ""
+        )
+    }
+
+    private func showCertAlert(_ prompt: CertPrompt) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = prompt.changed
+            ? L10n.t("远程计算机的证书已更改")
+            : L10n.t("无法验证远程计算机的证书")
+        alert.informativeText = certificateMessage(prompt)
+        alert.addButton(withTitle: L10n.t("接受并连接"))
+        alert.addButton(withTitle: L10n.t("取消"))
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first {
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.makeKeyAndOrderFront(nil)
+        }
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            acceptCertPrompt()
+        } else {
+            declineCertPrompt()
+        }
+    }
+
+    private func certificateMessage(_ prompt: CertPrompt) -> String {
+        var lines: [String] = []
+        lines.append(L10n.f("%@（%@:%ld）", prompt.pcName, prompt.host, prompt.port))
+        lines.append("")
+        lines.append(L10n.t("主题：") + prompt.subject)
+        lines.append(L10n.t("颁发者：") + prompt.issuer)
+        if !prompt.fingerprint.isEmpty {
+            lines.append(L10n.t("指纹：") + prompt.fingerprint)
+        }
+        if prompt.changed {
+            lines.append("")
+            lines.append(L10n.t("之前的证书："))
+            if !prompt.oldSubject.isEmpty {
+                lines.append(L10n.t("主题：") + prompt.oldSubject)
+            }
+            if !prompt.oldFingerprint.isEmpty {
+                lines.append(L10n.t("指纹：") + prompt.oldFingerprint)
+            }
+            lines.append("")
+            lines.append(L10n.t("证书与上次连接时不一致，可能被篡改。请确认这是预期的改动。"))
+        } else {
+            lines.append("")
+            lines.append(L10n.t("无法验证该证书（可能是自签名证书）。只有在信任这台计算机时才应继续。"))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func acceptCertPrompt() {
+        guard let prompt = certPrompt else { return }
+        certPrompt = nil
+        guard var pc = pcs.first(where: { $0.id == prompt.pcID }) else { return }
+        pc.acceptedFingerprint = prompt.fingerprint
+        updatePC(pc)
+        if let creds = launchCredentials[prompt.pcID] {
+            launch(
+                pc: pc,
+                username: creds.username,
+                domain: creds.domain,
+                password: creds.password,
+                quality: creds.quality
+            )
+        }
+    }
+
+    func declineCertPrompt() {
+        guard let prompt = certPrompt else { return }
+        certPrompt = nil
+        let file = logsDirectory.appendingPathComponent("\(prompt.pcID.uuidString).cert")
+        try? FileManager.default.removeItem(at: file)
     }
 
     // MARK: - Connecting
@@ -511,11 +640,28 @@ final class Store: ObservableObject {
         // /from-stdin only covers the first prompt, so also provide an
         // askpass helper that returns the same password every time.
         var environment = ProcessInfo.processInfo.environment
+        switch settings.language {
+        case .chinese:
+            environment["LANRDP_LANG"] = "zh"
+        case .english:
+            environment["LANRDP_LANG"] = "en"
+        case .system:
+            let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
+            environment["LANRDP_LANG"] = preferred.hasPrefix("zh") ? "zh" : "en"
+        }
         if pc.hiDPI == true {
             // Ask the client to report the logical monitor size (window pixels
             // divided by the display scale, which the client reads from SDL).
             environment["LANRDP_LOGICAL_MONITOR"] = "1"
         }
+        let certFile = logsDirectory.appendingPathComponent("\(pc.id.uuidString).cert")
+        try? FileManager.default.removeItem(at: certFile)
+        if pc.certificatePolicy == .ask {
+            // The client writes the certificate details here instead of showing an
+            // SDL dialog; the app presents a native alert and reconnects on accept.
+            environment["LANRDP_CERT_FILE"] = certFile.path
+        }
+        launchCredentials[pc.id] = (username, domain, password, quality)
         if let askpass = makeAskpass(pcID: pc.id, password: password) {
             environment["FREERDP_ASKPASS"] = askpass.script.path
             askpassArtifacts[pc.id] = askpass
@@ -539,7 +685,12 @@ final class Store: ObservableObject {
                 self.logHandles[pcID] = nil
                 self.cleanupAskpass(for: pcID)
 
-                if !self.failureHandled.contains(pcID) && !self.ignoredExitIDs.contains(pcID) {
+                if let prompt = self.readCertPrompt(pcID: pcID, displayName: displayName) {
+                    NSLog("LanRDP cert prompt: %@ %@", prompt.pcName, prompt.fingerprint)
+                    self.failureHandled.insert(pcID)
+                    self.certPrompt = prompt
+                    self.showCertAlert(prompt)
+                } else if !self.failureHandled.contains(pcID) && !self.ignoredExitIDs.contains(pcID) {
                     let tail = self.logTail(at: logURL)
                     let ranLongEnoughToBeARealSession = Date().timeIntervalSince(launchedAt) > 10
                     let certificateFailure = !ranLongEnoughToBeARealSession
@@ -599,6 +750,15 @@ final class Store: ObservableObject {
                     self.monitors[pcID] = nil
                     return
                 }
+                // A pending certificate prompt is handled by the app alert, not
+                // as a connection failure.
+                let certFile = self.logsDirectory.appendingPathComponent("\(pcID.uuidString).cert")
+                if FileManager.default.fileExists(atPath: certFile.path) {
+                    self.monitors[pcID]?.invalidate()
+                    self.monitors[pcID] = nil
+                    return
+                }
+
                 let tail = self.logTail(at: logURL, maxLines: 40)
                 guard self.looksLikeFailure(tail) else { return }
 

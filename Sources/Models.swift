@@ -77,15 +77,17 @@ enum FullscreenResolution: String, Codable, CaseIterable, Identifiable {
 }
 
 enum CertificatePolicy: String, Codable, CaseIterable, Identifiable {
-    case ignore
+    case ask
     case tofu
     case deny
+    case ignore
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .ignore: return L10n.t("忽略证书错误（默认，无提示）")
+        case .ask: return L10n.t("询问（不信任时警告）")
+        case .ignore: return L10n.t("忽略证书错误（不提示）")
         case .tofu: return L10n.t("首次信任（高级）")
         case .deny: return L10n.t("严格校验")
         }
@@ -93,6 +95,8 @@ enum CertificatePolicy: String, Codable, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
+        case .ask:
+            return L10n.t("连接时校验证书；如果证书不受信任或发生变化，会弹出警告，由你决定是否继续。")
         case .ignore:
             return L10n.t("不校验证书，不会弹出首次信任提示。局域网和广域网都能直接连接，但无法防御中间人攻击；广域网建议配合 VPN 或可信证书使用。")
         case .tofu:
@@ -113,7 +117,7 @@ struct PC: Identifiable, Codable, Hashable {
     // Used when credentialID is nil: direct username/password login.
     var username: String?
     var domain: String?
-    var displayMode: DisplayMode = .fitWindow
+    var displayMode: DisplayMode = .fullScreen
     var width: Int = 1440
     var height: Int = 900
     var scaling: Int = 100
@@ -129,14 +133,16 @@ struct PC: Identifiable, Codable, Hashable {
     var fullscreenFollowScreen: Bool? = true
     // HiDPI: render at 2x the logical size (the window/desktop is sized in points)
     // and tell Windows to scale by the same factor, like macOS Retina.
-    var hiDPI: Bool? = false
+    var hiDPI: Bool? = true
     var clipboard: Bool = true
     var audio: Bool = true
     var multiMonitor: Bool = false
     var adminSession: Bool? = false
     var shareFolder: Bool = false
     var folderPath: String = ""
-    var certificatePolicy: CertificatePolicy = .ignore
+    var certificatePolicy: CertificatePolicy = .ask
+    // Accepted certificate fingerprint for the "ask" policy (SHA-256 hex).
+    var acceptedFingerprint: String?
     var extraArguments: String = ""
     var lastConnected: Date?
     var visitCount: Int? = 0
@@ -147,7 +153,7 @@ struct PC: Identifiable, Codable, Hashable {
 
 struct AppSettings: Codable, Hashable {
     var binaryPath: String = ""
-    var defaultCertificatePolicy: CertificatePolicy = .ignore
+    var defaultCertificatePolicy: CertificatePolicy = .ask
     var language: AppLanguage = .system
     var showMostVisited: Bool = true
 
