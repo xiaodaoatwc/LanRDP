@@ -1,0 +1,161 @@
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store base12/client/SDL/SDL3/sdl_context.cpp new12/client/SDL/SDL3/sdl_context.cpp
+--- base12/client/SDL/SDL3/sdl_context.cpp	2026-11-19 21:28:26
++++ new12/client/SDL/SDL3/sdl_context.cpp	2026-11-19 21:28:27
+@@ -444,10 +444,14 @@
+ 
+ 		Uint32 flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+ 
+-		if (freerdp_settings_get_bool(settings, FreeRDP_Fullscreen) &&
+-		    !freerdp_settings_get_bool(settings, FreeRDP_UseMultimon))
++		const BOOL wantFullscreen = freerdp_settings_get_bool(settings, FreeRDP_Fullscreen) &&
++		                            !freerdp_settings_get_bool(settings, FreeRDP_UseMultimon);
++		if (wantFullscreen)
+ 		{
+-			flags |= SDL_WINDOW_FULLSCREEN;
++			/* LanRDP: create a resizable window and enter fullscreen at runtime so
++			 * macOS uses a native fullscreen Space (Dock / Mission Control can switch
++			 * to it), instead of a borderless window on the current Space. */
++			flags |= SDL_WINDOW_RESIZABLE;
+ 		}
+ 
+ 		if (freerdp_settings_get_bool(settings, FreeRDP_UseMultimon))
+@@ -915,10 +919,12 @@
+ 
+ void SdlContext::applyMonitorOffset(SDL_WindowID window, float& x, float& y) const
+ {
+-	if (!freerdp_settings_get_bool(context()->settings, FreeRDP_UseMultimon))
+-		return;
+-
+ 	auto w = getWindowForId(window);
++	if (!w)
++		return;
++	/* Window offsets are in session coordinates. They are nonzero for multimon
++	 * windows and for the letterbox margins of a scaled (logical resolution)
++	 * session, so always remove them from the input position. */
+ 	x -= static_cast<float>(w->offsetX());
+ 	y -= static_cast<float>(w->offsetY());
+ }
+@@ -1103,24 +1109,24 @@
+ 	SDL_Point offset{ 0, 0 };
+ 	if (useLocalScale())
+ 	{
+-		window.setOffsetX(0);
+-		window.setOffsetY(0);
+-		if (gdi->width < size.w)
+-		{
+-			window.setOffsetX((size.w - gdi->width) / 2);
+-		}
+-		if (gdi->height < size.h)
+-		{
+-			window.setOffsetY((size.h - gdi->height) / 2);
+-		}
+-
+-		_localScale = { static_cast<float>(size.w) / static_cast<float>(gdi->width),
+-			            static_cast<float>(size.h) / static_cast<float>(gdi->height) };
++		/* LanRDP: scale uniformly so circles stay round when the session aspect
++		 * ratio differs from the window (e.g. logical size vs. the full frame);
++		 * center the image and keep the input offsets in session coordinates. */
++		const float sx = static_cast<float>(size.w) / static_cast<float>(gdi->width);
++		const float sy = static_cast<float>(size.h) / static_cast<float>(gdi->height);
++		const float s = std::min(sx, sy);
++		_localScale = { s, s };
++		window.setOffsetX(static_cast<Sint32>(
++		    std::lround((static_cast<float>(size.w) - static_cast<float>(gdi->width) * s) * 0.5f / s)));
++		window.setOffsetY(static_cast<Sint32>(
++		    std::lround((static_cast<float>(size.h) - static_cast<float>(gdi->height) * s) * 0.5f / s)));
+ 		if (!window.drawScaledRects(surface, _localScale, drawList))
+ 			return false;
+ 	}
+ 	else
+ 	{
++		window.setOffsetX(0);
++		window.setOffsetY(0);
+ 		if (freerdp_settings_get_bool(context()->settings, FreeRDP_UseMultimon))
+ 			offset = { window.offsetX(), window.offsetY() };
+ 		if (!window.drawRects(surface, offset, drawList))
+@@ -1900,6 +1906,13 @@
+ 
+ bool SdlContext::useLocalScale() const
+ {
++	/* LanRDP: logical-resolution mode keeps the session smaller than the window
++	 * (window pixels / display scale) while dynamic resolution handles resizes,
++	 * so the client must scale locally as well. */
++	static const bool logicalMonitor = getenv("LANRDP_LOGICAL_MONITOR") != nullptr;
++	if (logicalMonitor)
++		return true;
++
+ 	const auto ssize = freerdp_settings_get_bool(context()->settings, FreeRDP_SmartSizing);
+ 	if (ssize)
+ 		return true;
+@@ -1987,6 +2000,10 @@
+ 		{
+ 			SDL_ShowWindow(window.second.window());
+ 			SDL_RaiseWindow(window.second.window());
++			if (freerdp_settings_get_bool(context()->settings, FreeRDP_Fullscreen) &&
++			    !freerdp_settings_get_bool(context()->settings, FreeRDP_UseMultimon) &&
++			    ((SDL_GetWindowFlags(window.second.window()) & SDL_WINDOW_FULLSCREEN) == 0))
++				window.second.fullscreen(true, false);
+ 		}
+ 	}
+ 
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store base12/client/SDL/SDL3/sdl_disp.cpp new12/client/SDL/SDL3/sdl_disp.cpp
+--- base12/client/SDL/SDL3/sdl_disp.cpp	2026-11-19 21:28:25
++++ new12/client/SDL/SDL3/sdl_disp.cpp	2026-11-19 21:28:27
+@@ -212,6 +212,23 @@
+ 	auto settings = _sdl->context()->settings;
+ 	WINPR_ASSERT(settings);
+ 
++	/* LanRDP: in logical-resolution mode the session must be reported in points,
++	 * not in the window's backing pixels (macOS Retina renders at 2x). The scale
++	 * is read from SDL so it always matches the current display. */
++	static const BOOL logicalMonitor = getenv("LANRDP_LOGICAL_MONITOR") != nullptr;
++	float monitorScale = 1.0f;
++	if (logicalMonitor)
++	{
++		if (auto* win = _sdl->getFirstWindow())
++		{
++			const float contentScale = SDL_GetWindowDisplayScale(win->window());
++			if (contentScale >= 1.0f)
++				monitorScale = contentScale;
++		}
++	}
++	WLog_Print(_sdl->getWLog(), WLOG_WARN,
++	           "LanRDP display layout: logical=%d scale=%.2f", logicalMonitor ? 1 : 0,
++	           monitorScale);
+ 	std::vector<DISPLAY_CONTROL_MONITOR_LAYOUT> layouts;
+ 	layouts.reserve(nmonitors);
+ 
+@@ -221,10 +238,14 @@
+ 		DISPLAY_CONTROL_MONITOR_LAYOUT layout = {};
+ 
+ 		layout.Flags = (monitor->is_primary ? DISPLAY_CONTROL_MONITOR_PRIMARY : 0);
+-		layout.Left = monitor->x;
+-		layout.Top = monitor->y;
+-		layout.Width = WINPR_ASSERTING_INT_CAST(uint32_t, monitor->width);
+-		layout.Height = WINPR_ASSERTING_INT_CAST(uint32_t, monitor->height);
++		layout.Left = WINPR_ASSERTING_INT_CAST(
++		    uint32_t, lround(static_cast<double>(monitor->x) / monitorScale));
++		layout.Top = WINPR_ASSERTING_INT_CAST(
++		    uint32_t, lround(static_cast<double>(monitor->y) / monitorScale));
++		layout.Width = WINPR_ASSERTING_INT_CAST(
++		    uint32_t, lround(static_cast<double>(monitor->width) / monitorScale));
++		layout.Height = WINPR_ASSERTING_INT_CAST(
++		    uint32_t, lround(static_cast<double>(monitor->height) / monitorScale));
+ 		layout.Orientation = ORIENTATION_LANDSCAPE;
+ 		layout.PhysicalWidth = monitor->attributes.physicalWidth;
+ 		layout.PhysicalHeight = monitor->attributes.physicalHeight;
+diff -ruN -x *.o -x *.bak* -x *.orig -x *.rej -x build -x CMakeCache.txt -x CMakeFiles -x .DS_Store base12/client/SDL/SDL3/sdl_window.cpp new12/client/SDL/SDL3/sdl_window.cpp
+--- base12/client/SDL/SDL3/sdl_window.cpp	2026-11-19 21:28:26
++++ new12/client/SDL/SDL3/sdl_window.cpp	2026-11-19 21:28:27
+@@ -398,9 +398,9 @@
+ 	const auto mody = std::modf(static_cast<float>(srcRect.y) * scale.y, &iy);
+ 	auto sw = std::ceil(static_cast<float>(srcRect.w) * scale.x) + std::ceil(modx);
+ 	auto sh = std::ceil(static_cast<float>(srcRect.h) * scale.y) + std::ceil(mody);
+-	dstRect.x = static_cast<Sint32>(ix);
++	dstRect.x = static_cast<Sint32>(ix) + static_cast<Sint32>(std::lround(offsetX() * scale.x));
+ 	dstRect.w = static_cast<Sint32>(sw);
+-	dstRect.y = static_cast<Sint32>(iy);
++	dstRect.y = static_cast<Sint32>(iy) + static_cast<Sint32>(std::lround(offsetY() * scale.y));
+ 	dstRect.h = static_cast<Sint32>(sh);
+ 	return blit(surface, srcRect, dstRect);
+ }

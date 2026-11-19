@@ -45,6 +45,37 @@ enum DisplayMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum FullscreenResolution: String, Codable, CaseIterable, Identifiable {
+    case native
+    case half
+    case threeQuarters
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .native: return L10n.t("跟随屏幕")
+        case .half: return L10n.t("50%（HiDPI 逻辑分辨率）")
+        case .threeQuarters: return L10n.t("75%")
+        case .custom: return L10n.t("自定义")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .native:
+            return L10n.t("远程桌面使用屏幕的物理分辨率。高分屏上 Windows 应用若不跟随缩放，界面会显得很小。")
+        case .half:
+            return L10n.t("远程桌面使用物理分辨率的一半（2x 屏上相当于系统的逻辑分辨率），显示时再放大；Windows 界面大小正常，但会略柔和。")
+        case .threeQuarters:
+            return L10n.t("远程桌面使用物理分辨率的 75%，在清晰度和界面大小之间折中。")
+        case .custom:
+            return L10n.t("手动指定远程桌面分辨率，全屏时放大到铺满屏幕。")
+        }
+    }
+}
+
 enum CertificatePolicy: String, Codable, CaseIterable, Identifiable {
     case ignore
     case tofu
@@ -88,6 +119,17 @@ struct PC: Identifiable, Codable, Hashable {
     var scaling: Int = 100
     var quality: QualityPreset? = .auto
     var dynamicResolution: Bool = true
+    // Only used in fullscreen mode: run the session at a scaled resolution and
+    // let the client upscale it (nil/absent = native screen resolution).
+    var fullscreenResolution: FullscreenResolution? = .native
+    var fullscreenWidth: Int? = 0
+    var fullscreenHeight: Int? = 0
+    // Fullscreen: use the screen's physical resolution (true, default) or the
+    // width/height fields, which the client scales up to fill the screen.
+    var fullscreenFollowScreen: Bool? = true
+    // HiDPI: render at 2x the logical size (the window/desktop is sized in points)
+    // and tell Windows to scale by the same factor, like macOS Retina.
+    var hiDPI: Bool? = false
     var clipboard: Bool = true
     var audio: Bool = true
     var multiMonitor: Bool = false

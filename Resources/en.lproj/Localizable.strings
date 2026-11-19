@@ -245,3 +245,27 @@
 
 /* PC move menu */
 "移动到分组" = "Move to group";
+
+/* Fullscreen resolution */
+"全屏分辨率" = "Fullscreen resolution";
+"跟随屏幕" = "Follow screen";
+"50%（HiDPI 逻辑分辨率）" = "50% (HiDPI logical)";
+"自定义" = "Custom";
+"远程桌面使用屏幕的物理分辨率。高分屏上 Windows 应用若不跟随缩放，界面会显得很小。" = "The remote desktop uses the screen's physical resolution. On high-DPI displays, Windows apps that ignore DPI scaling look tiny.";
+"远程桌面使用物理分辨率的一半（2x 屏上相当于系统的逻辑分辨率），再放大铺满全屏；Windows 界面大小正常，但会略柔和。" = "The remote desktop runs at half the physical resolution (the logical resolution on a 2x display) and is scaled up to fill the screen; Windows UI looks normal but slightly softer.";
+"远程桌面使用物理分辨率的 75%，在清晰度和界面大小之间折中。" = "The remote desktop runs at 75% of the physical resolution, trading a little sharpness for normal-sized UI.";
+"手动指定远程桌面分辨率，全屏时放大到铺满屏幕。" = "Use a custom remote desktop resolution, scaled up to fill the screen in fullscreen.";
+
+/* HiDPI resolution */
+"HiDPI 分辨率" = "HiDPI resolution";
+"远程桌面使用物理分辨率的一半（2x 屏上相当于系统的逻辑分辨率），显示时再放大；Windows 界面大小正常，但会略柔和。" = "The remote desktop runs at half the physical resolution (the logical resolution on a 2x display) and is scaled when shown; Windows UI looks normal but slightly softer.";
+"远程桌面使用物理分辨率的 75%，在清晰度和界面大小之间折中。" = "The remote desktop runs at 75% of the physical resolution, trading a little sharpness for normal-sized UI.";
+
+/* Resolution / follow screen */
+"跟随屏幕分辨率" = "Follow screen resolution";
+"关闭后使用下面的分辨率连接，并放大铺满屏幕。" = "When off, the configured resolution is used and scaled up to fill the screen.";
+"HiDPI 预设按当前屏幕的物理分辨率换算，填入后仍可手动调整。" = "HiDPI presets are computed from the current screen's physical resolution; you can still edit the value afterwards.";
+
+/* HiDPI logical rendering */
+"HiDPI（按逻辑分辨率显示）" = "HiDPI (render at logical size)";
+"按 macOS 逻辑分辨率运行远程桌面：全屏使用屏幕的可见逻辑尺寸（例如 1710×1068），窗口/固定使用下面填的宽高（单位是点），再由客户端放大铺满。Windows 里的截图和显示设置就是这些逻辑分辨率，界面大小与 macOS 一致。" = "Runs the remote desktop at the macOS logical resolution: fullscreen uses the screen visible logical size (e.g. 1710x1068), window/fixed use the width/height below (in points), and the client scales it up. Screenshots and display settings inside Windows show that logical resolution, matching macOS UI size.";

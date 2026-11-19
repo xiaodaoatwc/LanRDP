@@ -6,6 +6,14 @@
 它不依赖 Microsoft 账号，也没有 Windows App 那套联网健康检查。
 只要目标 Windows 的 3389 端口可达，局域网和广域网都可以连接；广域网通常需要端口映射、VPN 或内网穿透。
 
+## 1.14.4 更新 / What's New
+
+- 新增「HiDPI（按逻辑分辨率显示）」：全屏/窗口/固定分辨率均可用，远程桌面按 macOS 逻辑分辨率
+  运行并由客户端放大，界面大小与 macOS 一致、带宽更低。
+- 全屏使用原生 macOS 全屏 Space，Dock / Mission Control 可切换。
+- 系统分辨率变化时原地调整远程分辨率（Display Control），不重连。
+- 缩放保持宽高比，修正窗口偏移下的鼠标定位。
+
 ## 1.14.3 更新 / What's New
 
 - H.264 解码只使用系统 VideoToolbox（显式请求硬件解码），App 不再分发 H.264 解码实现。

@@ -111,7 +111,17 @@ struct PCEditorView: View {
                         }
                     }
 
-                    if draft.displayMode != .fullScreen {
+                    if draft.displayMode == .fullScreen {
+                        Toggle("跟随屏幕分辨率", isOn: followScreenBinding)
+                        if (draft.fullscreenFollowScreen ?? true) == false {
+                            Text("关闭后使用下面的分辨率连接，并放大铺满屏幕。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if draft.displayMode != .fullScreen ||
+                        (draft.fullscreenFollowScreen ?? true) == false {
                         HStack {
                             TextField("宽度", value: $draft.width, format: .number)
                             Text("×")
@@ -131,13 +141,35 @@ struct PCEditorView: View {
                                 Button("使用可见桌面（不含 Dock）") {
                                     useCurrentScreenSize()
                                 }
+                                Divider()
+                                if let hidpi = RDPLauncher.hiDPIResolution(factor: 0.5) {
+                                    Button("HiDPI 50%（\(hidpi.width)×\(hidpi.height)）") {
+                                        draft.width = hidpi.width
+                                        draft.height = hidpi.height
+                                    }
+                                }
+                                if let hidpi = RDPLauncher.hiDPIResolution(factor: 0.75) {
+                                    Button("HiDPI 75%（\(hidpi.width)×\(hidpi.height)）") {
+                                        draft.width = hidpi.width
+                                        draft.height = hidpi.height
+                                    }
+                                }
                             }
                             .fixedSize()
                             Text(L10n.f("当前：%ld×%ld", draft.width, draft.height))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        Text("HiDPI 预设按当前屏幕的物理分辨率换算，填入后仍可手动调整。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+
+                    Toggle("HiDPI（按逻辑分辨率显示）", isOn: hiDPIBinding)
+                    Text("按 macOS 逻辑分辨率运行远程桌面：全屏使用屏幕的可见逻辑尺寸（例如 1710×1068），窗口/固定使用下面填的宽高（单位是点），再由客户端放大铺满。Windows 里的截图和显示设置就是这些逻辑分辨率，界面大小与 macOS 一致。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     Picker("缩放", selection: $draft.scaling) {
                         Text("100%").tag(100)
@@ -159,6 +191,8 @@ struct PCEditorView: View {
                         .foregroundStyle(.secondary)
 
                     Toggle("动态分辨率", isOn: $draft.dynamicResolution)
+                        .disabled(draft.displayMode == .fullScreen &&
+                                  (draft.fullscreenFollowScreen ?? true) == false)
                     Toggle("多显示器", isOn: $draft.multiMonitor)
                     Toggle("管理员会话（/admin）", isOn: adminBinding)
                     Text("RDS 服务器没有可用 CAL 时，用管理员会话连接，相当于 mstsc /admin；需要该账户有管理员权限。")
@@ -289,6 +323,20 @@ struct PCEditorView: View {
         // whether the Dock is on the left, right or bottom.
         draft.width = Int(screen.visibleFrame.width)
         draft.height = Int(screen.visibleFrame.height)
+    }
+
+    private var hiDPIBinding: Binding<Bool> {
+        Binding(
+            get: { draft.hiDPI ?? false },
+            set: { draft.hiDPI = $0 }
+        )
+    }
+
+    private var followScreenBinding: Binding<Bool> {
+        Binding(
+            get: { draft.fullscreenFollowScreen ?? true },
+            set: { draft.fullscreenFollowScreen = $0 }
+        )
     }
 
     private var qualityBinding: Binding<QualityPreset> {

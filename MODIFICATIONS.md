@@ -93,6 +93,7 @@ patch -p1 < patches/0008-sdl-input-hotkey-modifier.patch
 patch -p1 < patches/0009-sdl-bounded-frame-draw.patch
 patch -p1 < patches/0010-bpp-keeps-gfx-defaults.patch
 patch -p1 < patches/0011-sdl-coalescing-yuv-overlay-vt-hw.patch
+patch -p1 < patches/0012-logical-resolution-fullscreen-space.patch
 ```
 
 ## 11. SDL 渲染合并、VideoToolbox 硬件解码提示、可选 YUV 叠加
@@ -109,4 +110,18 @@ patch -p1 < patches/0011-sdl-coalescing-yuv-overlay-vt-hw.patch
   Apple Silicon 的 H.264 硬解需要显式提示才更有保障。
 - **效果**：窗口视频上传耗时 72 → 43 ms/s（-40%），全屏 52 → 42 ms/s（-20%）。
 
-修改日期：2026-11-08，2026-11-13 增补第 8 项，2026-11-15 增补第 9、10、11 项。
+## 12. 逻辑分辨率显示、原生全屏 Space、动态分辨率换算
+
+- **修改**：
+  - `client/SDL/SDL3/sdl_context.cpp`：全屏窗口改为先创建普通可缩放窗口、显示第一帧后再进全屏，
+    让 macOS 使用**原生全屏 Space**（Dock / Mission Control 可以切换过去）；
+  - 逻辑分辨率模式（`LANRDP_LOGICAL_MONITOR=1`）：强制本地缩放，缩放时保持宽高比、居中，
+    并把窗口偏移同时用于绘制和输入换算；
+  - `client/SDL/SDL3/sdl_disp.cpp`：Display Control 上报的显示器尺寸按 SDL 的窗口显示缩放
+    换算成逻辑分辨率（Retina 2x → 除以 2），系统分辨率变化时原地调整会话分辨率。
+- **原因**：高分屏上让远程桌面按 macOS 逻辑分辨率显示（Windows 截图 ≈ 逻辑尺寸、带宽低），
+  同时支持 mstsc 那样的“不重连原地改分辨率”。
+- **兼容性**：仅在该模式开启时生效，默认行为不变。
+
+修改日期：2026-11-08，2026-11-13 增补第 8 项，2026-11-15 增补第 9、10、11 项，
+2026-11-17 增补第 12 项。

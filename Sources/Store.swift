@@ -510,12 +510,17 @@ final class Store: ObservableObject {
         // FreeRDP can ask for the password more than once (NLA and logon).
         // /from-stdin only covers the first prompt, so also provide an
         // askpass helper that returns the same password every time.
+        var environment = ProcessInfo.processInfo.environment
+        if pc.hiDPI == true {
+            // Ask the client to report the logical monitor size (window pixels
+            // divided by the display scale, which the client reads from SDL).
+            environment["LANRDP_LOGICAL_MONITOR"] = "1"
+        }
         if let askpass = makeAskpass(pcID: pc.id, password: password) {
-            var environment = ProcessInfo.processInfo.environment
             environment["FREERDP_ASKPASS"] = askpass.script.path
-            process.environment = environment
             askpassArtifacts[pc.id] = askpass
         }
+        process.environment = environment
 
         let inputPipe = Pipe()
         process.standardInput = inputPipe

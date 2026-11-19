@@ -3,6 +3,30 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.4 — 2026-11-19
+
+### 中文
+
+- 新增「HiDPI（按逻辑分辨率显示）」选项，全屏 / 窗口 / 固定分辨率三种模式都可用：
+  远程桌面按 macOS 逻辑分辨率运行（窗口内截图约等于逻辑尺寸），由客户端放大铺满，
+  界面大小与 macOS 一致、带宽明显低于原生分辨率。
+- 全屏改为原生 macOS 全屏 Space：Dock 点击 / Mission Control 可以切换到对应连接。
+- 支持“不重连、原地改分辨率”：macOS 系统分辨率变化时，通过 Display Control 让服务器
+  直接调整会话分辨率（与 mstsc 行为一致），连接状态保持已连接。
+- 缩放显示保持宽高比（圆不再被拉伸），并修正相对窗口偏移下的鼠标定位。
+
+### English
+
+- New "HiDPI (render at logical size)" option, available in fullscreen, window and fixed modes:
+  the remote desktop runs at the macOS logical resolution and the client scales it up, so the UI
+  matches macOS and bandwidth stays much lower than native pixels.
+- Fullscreen now uses a native macOS fullscreen Space, so the Dock icon / Mission Control can switch
+  to the connection.
+- In-place resolution changes: when the macOS display resolution changes, the client asks the server
+  to resize the session through Display Control (like mstsc) without reconnecting.
+- Scaled output keeps its aspect ratio (no more stretched circles) and mouse mapping is corrected
+  for the window offset.
+
 ## 1.14.3 — 2026-11-15
 
 ### 中文
