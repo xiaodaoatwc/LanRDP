@@ -649,6 +649,14 @@ final class Store: ObservableObject {
             let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
             environment["LANRDP_LANG"] = preferred.hasPrefix("zh") ? "zh" : "en"
         }
+        if pc.displayMode == .fixedSize && !pc.multiMonitor {
+            // Keep the session at the configured resolution while the window stays
+            // resizable; the client scales the image into the window.
+            environment["LANRDP_SCALE_TO_WINDOW"] = "1"
+            environment["LANRDP_FIXED_SIZE"] =
+                "\(max(pc.width, 640))x\(max(pc.height, 480))"
+        }
+        environment["LANRDP_FILTER"] = (pc.renderFilter ?? .linear) == .nearest ? "nearest" : "linear"
         if pc.hiDPI == true {
             // Ask the client to report the logical monitor size (window pixels
             // divided by the display scale, which the client reads from SDL).

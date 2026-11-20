@@ -26,7 +26,8 @@ struct CredentialsView: View {
                     ForEach(store.credentials) { credential in
                         CredentialRow(
                             credential: credential,
-                            usedCount: store.usedCount(for: credential)
+                            usedCount: store.usedCount(for: credential),
+                            onDelete: { deletingCredential = credential }
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -67,7 +68,7 @@ struct CredentialsView: View {
             }
             Button("取消", role: .cancel) { deletingCredential = nil }
         } message: { credential in
-            Text(L10n.f("“%@”会从钥匙串删除；使用它的电脑会变成“未选择凭据”，需要重新指定。", credential.name))
+            Text(L10n.f("“%@”会从钥匙串删除；引用它的电脑会自动改为默认的直接登录，下次连接时输入用户名和密码。", credential.name))
         }
     }
 
@@ -97,6 +98,7 @@ struct CredentialsView: View {
 private struct CredentialRow: View {
     let credential: Credential
     let usedCount: Int
+    let onDelete: () -> Void
 
     private var account: String {
         if credential.domain.isEmpty {
@@ -128,6 +130,13 @@ private struct CredentialRow: View {
             Text(usedCount == 0 ? L10n.t("未使用") : L10n.f("%ld 台电脑", usedCount))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help(L10n.t("删除凭据"))
+            .accessibilityLabel(L10n.t("删除凭据"))
         }
         .padding(.vertical, 8)
     }

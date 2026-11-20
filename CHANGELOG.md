@@ -3,6 +3,31 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.6 — 2026-11-20
+
+### 中文
+
+- 显示设置新增「缩放滤波」：线性（平滑，默认）/ 最近邻（锐利，非整数倍缩放可能有锯齿）。
+- 修复固定分辨率模式在 HiDPI 下被放大成 2 倍会话尺寸的问题：现在 1280×720 就是 1280×720，
+  与窗口模式一致。
+- 固定分辨率模式下窗口可自由缩放，画面由客户端等比缩放填充；窗口锁定会话宽高比，不再出现黑边。
+- 设置新增「更新 → 查找新版本」，点击在浏览器打开 GitHub 最新 Release 页面（不做后台检查、
+  不自动下载）。
+- 凭据列表新增行内删除按钮；删除凭据后，引用它的电脑自动回退为默认的直接登录。
+
+### English
+
+- New "Scaling filter" display option: linear (smooth, default) or nearest (sharper, may alias at
+  non-integer scales).
+- Fixed the fixed-resolution mode being doubled into a 2x session in HiDPI: 1280×720 now means
+  1280×720, the same as window mode.
+- Fixed-resolution windows are now resizable and the client scales the image to fill them; the window
+  aspect ratio is locked to the session so there are no letterbox bars.
+- New Settings → Updates → "Find new version" button that opens the latest GitHub release page in the
+  browser (no background checks, no automatic downloads).
+- The credentials list now has an inline delete button; deleting a credential makes the PCs that
+  reference it fall back to the default direct login.
+
 ## 1.14.5 — 2026-11-19
 
 ### 中文

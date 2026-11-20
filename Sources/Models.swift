@@ -76,6 +76,11 @@ enum FullscreenResolution: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum RenderFilter: String, Codable, CaseIterable {
+    case linear
+    case nearest
+}
+
 enum CertificatePolicy: String, Codable, CaseIterable, Identifiable {
     case ask
     case tofu
@@ -134,6 +139,9 @@ struct PC: Identifiable, Codable, Hashable {
     // HiDPI: render at 2x the logical size (the window/desktop is sized in points)
     // and tell Windows to scale by the same factor, like macOS Retina.
     var hiDPI: Bool? = true
+    // Upscaling filter for the remote image: linear (smooth, default) or
+    // nearest (crisper edges, blockier at non-integer scales).
+    var renderFilter: RenderFilter? = .linear
     var clipboard: Bool = true
     var audio: Bool = true
     var multiMonitor: Bool = false

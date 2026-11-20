@@ -160,14 +160,18 @@ enum RDPLauncher {
                 args.append("+dynamic-resolution")
             }
         case .fixedSize:
+            // Fixed resolution: the session stays at the configured size while the
+            // window can be resized; the client scales the image to the window.
+            // The display-control layout is pinned to the configured size through
+            // LANRDP_FIXED_SIZE (set by Store.launch).
             if hiDPI {
                 args.append("/w:\(max(Int((Double(max(pc.width, 640)) * scale).rounded()), 640))")
                 args.append("/h:\(max(Int((Double(max(pc.height, 480)) * scale).rounded()), 480))")
-                args.append("+dynamic-resolution")
             } else {
                 args.append("/w:\(max(pc.width, 640))")
                 args.append("/h:\(max(pc.height, 480))")
             }
+            args.append("+dynamic-resolution")
         }
 
         // The DPI scale applies to every mode, including the logical-resolution

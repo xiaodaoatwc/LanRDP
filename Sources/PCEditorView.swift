@@ -183,6 +183,14 @@ struct PCEditorView: View {
                         Text("200% (Retina)").tag(200)
                     }
 
+                    Picker("缩放滤波", selection: renderFilterBinding) {
+                        Text("线性（平滑，默认）").tag(RenderFilter.linear)
+                        Text("最近邻（锐利，可能锯齿）").tag(RenderFilter.nearest)
+                    }
+                    Text("远端画面被放大时使用的滤镜：线性更平滑，最近邻边缘更硬、非整数倍缩放时可能出现锯齿。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Picker("画质", selection: qualityBinding) {
                         ForEach(QualityPreset.allCases) { preset in
                             Text(preset.title).tag(preset)
@@ -325,6 +333,13 @@ struct PCEditorView: View {
         // whether the Dock is on the left, right or bottom.
         draft.width = Int(screen.visibleFrame.width)
         draft.height = Int(screen.visibleFrame.height)
+    }
+
+    private var renderFilterBinding: Binding<RenderFilter> {
+        Binding(
+            get: { draft.renderFilter ?? .linear },
+            set: { draft.renderFilter = $0 }
+        )
     }
 
     private var hiDPIBinding: Binding<Bool> {

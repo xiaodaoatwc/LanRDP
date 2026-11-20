@@ -285,3 +285,21 @@
 "之前的证书：" = "Previous certificate:";
 "证书与上次连接时不一致，可能被篡改。请确认这是预期的改动。" = "The certificate differs from the previous connection and may have been tampered with. Confirm this change is expected.";
 "无法验证该证书（可能是自签名证书）。只有在信任这台计算机时才应继续。" = "This certificate cannot be verified (it may be self-signed). Continue only if you trust this computer.";
+
+/* Scaling filter */
+"缩放滤波" = "Scaling filter";
+"线性（平滑，默认）" = "Linear (smooth, default)";
+"最近邻（锐利，可能锯齿）" = "Nearest (sharp, may alias)";
+"远端画面被放大时使用的滤镜：线性更平滑，最近邻边缘更硬、非整数倍缩放时可能出现锯齿。" = "Filter used when the remote image is upscaled: linear is smoother; nearest keeps edges harder but may alias at non-integer scales.";
+
+/* Update check */
+"更新" = "Updates";
+"查找新版本" = "Find new version";
+"在浏览器中打开 GitHub 发布页，下载最新的安装包。" = "Open the GitHub releases page in your browser to download the latest installer.";
+"下载资产 LanRDP-x.y.z-universal.dmg。若 macOS 提示“无法验证开发者”，请在 Finder 中右键该 App 选择“打开”。" = "Download the LanRDP-x.y.z-universal.dmg asset. If macOS says the developer cannot be verified, right-click the app in Finder and choose Open.";
+"无法打开浏览器" = "Cannot open the browser";
+"请手动访问 https://github.com/xiaodaoatwc/LanRDP/releases/latest" = "Please visit https://github.com/xiaodaoatwc/LanRDP/releases/latest manually.";
+
+/* Credential deletion */
+"删除凭据" = "Delete credential";
+"“%@”会从钥匙串删除；引用它的电脑会自动改为默认的直接登录，下次连接时输入用户名和密码。" = "“%@” will be removed from the Keychain; PCs that reference it fall back to the default direct login and ask for a username and password on the next connection.";

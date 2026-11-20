@@ -107,6 +107,28 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("更新") {
+                    HStack(spacing: 12) {
+                        Button {
+                            openReleasesPage()
+                        } label: {
+                            Label("查找新版本", systemImage: "arrow.down.circle")
+                        }
+                        Text("在浏览器中打开 GitHub 发布页，下载最新的安装包。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let releasesURL = URL(string: "https://github.com/xiaodaoatwc/LanRDP/releases/latest") {
+                        Link("https://github.com/xiaodaoatwc/LanRDP/releases/latest",
+                             destination: releasesURL)
+                            .font(.caption)
+                    }
+                    Text("下载资产 LanRDP-x.y.z-universal.dmg。若 macOS 提示“无法验证开发者”，请在 Finder 中右键该 App 选择“打开”。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
                 Section("关于") {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "desktopcomputer")
@@ -143,6 +165,18 @@ struct SettingsView: View {
 
     private func openKeychainAccess() {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Keychain Access.app"))
+    }
+
+    private func openReleasesPage() {
+        guard let url = URL(string: "https://github.com/xiaodaoatwc/LanRDP/releases/latest") else {
+            return
+        }
+        if !NSWorkspace.shared.open(url) {
+            store.lastError = AppAlert(
+                title: L10n.t("无法打开浏览器"),
+                message: L10n.t("请手动访问 https://github.com/xiaodaoatwc/LanRDP/releases/latest")
+            )
+        }
     }
 
     private func openNotices() {

@@ -1,0 +1,123 @@
+diff -ruN a/client/SDL/SDL3/sdl_context.cpp b/client/SDL/SDL3/sdl_context.cpp
+--- a/client/SDL/SDL3/sdl_context.cpp	2026-11-20 23:52:47
++++ b/client/SDL/SDL3/sdl_context.cpp	2026-11-20 23:52:47
+@@ -316,7 +316,9 @@
+ 	context->update->SetKeyboardIndicators = sdlInput::keyboard_set_indicators;
+ 	context->update->SetKeyboardImeStatus = sdlInput::keyboard_set_ime_status;
+ 
+-	if (!sdl->setResizeable(false))
++	/* Fixed-resolution mode keeps the session size but lets the user resize the
++	 * window; the client then scales the image locally. */
++	if (!sdl->setResizeable(getenv("LANRDP_SCALE_TO_WINDOW") != nullptr))
+ 		return FALSE;
+ 	if (!sdl->setFullscreen(freerdp_settings_get_bool(context->settings, FreeRDP_Fullscreen) ||
+ 	                            freerdp_settings_get_bool(context->settings, FreeRDP_UseMultimon),
+@@ -1902,6 +1904,8 @@
+ 	 * and bounce the session resolution back. */
+ 	if (freerdp_settings_get_bool(context()->settings, FreeRDP_DynamicResolutionUpdate))
+ 		return true;
++	if (getenv("LANRDP_SCALE_TO_WINDOW") != nullptr)
++		return true;
+ 	if (!useLocalScale())
+ 		return true;
+ 	if (!window)
+@@ -1917,6 +1921,9 @@
+ 	static const bool logicalMonitor = getenv("LANRDP_LOGICAL_MONITOR") != nullptr;
+ 	if (logicalMonitor)
+ 		return true;
++	if ((getenv("LANRDP_SCALE_TO_WINDOW") != nullptr) &&
++	    !freerdp_settings_get_bool(context()->settings, FreeRDP_UseMultimon))
++		return true;
+ 
+ 	const auto ssize = freerdp_settings_get_bool(context()->settings, FreeRDP_SmartSizing);
+ 	if (ssize)
+@@ -2264,7 +2271,8 @@
+ 	const auto settings = context()->settings;
+ 	const bool dyn = freerdp_settings_get_bool(settings, FreeRDP_DynamicResolutionUpdate);
+ 	const bool smart = freerdp_settings_get_bool(settings, FreeRDP_SmartSizing);
+-	bool use = (dyn && enable) || smart;
++	const bool scaleToWindow = getenv("LANRDP_SCALE_TO_WINDOW") != nullptr;
++	bool use = (dyn && enable) || smart || (scaleToWindow && enable);
+ 
+ 	for (const auto& window : _windows)
+ 	{
+diff -ruN a/client/SDL/SDL3/sdl_disp.cpp b/client/SDL/SDL3/sdl_disp.cpp
+--- a/client/SDL/SDL3/sdl_disp.cpp	2026-11-20 23:52:47
++++ b/client/SDL/SDL3/sdl_disp.cpp	2026-11-20 23:52:47
+@@ -315,6 +315,20 @@
+ 		layouts.emplace_back(layout);
+ 	}
+ 
++	/* Fixed-resolution sessions: pin the layout to the configured size so window
++	 * resizes only scale the image locally instead of changing the session. */
++	const char* fixedSize = getenv("LANRDP_FIXED_SIZE");
++	if (fixedSize && !layouts.empty())
++	{
++		unsigned int fw = 0;
++		unsigned int fh = 0;
++		if ((sscanf(fixedSize, "%ux%u", &fw, &fh) == 2) && (fw > 0) && (fh > 0))
++		{
++			layouts[0].Width = fw;
++			layouts[0].Height = fh;
++		}
++	}
++
+ 	if (!settings_changed(layouts))
+ 		return true;
+ 
+diff -ruN a/client/SDL/SDL3/sdl_window.cpp b/client/SDL/SDL3/sdl_window.cpp
+--- a/client/SDL/SDL3/sdl_window.cpp	2026-11-20 23:52:47
++++ b/client/SDL/SDL3/sdl_window.cpp	2026-11-20 23:52:47
+@@ -31,7 +31,16 @@
+ 
+ #define TAG "com.freerdp.client.SDL"
+ 
++/* LanRDP: upscaling filter selected in the app (LANRDP_FILTER=nearest). */
++static SDL_ScaleMode lanrdp_scale_mode()
++{
++	const char* filter = getenv("LANRDP_FILTER");
++	if (filter && (strcmp(filter, "nearest") == 0))
++		return SDL_SCALEMODE_NEAREST;
++	return SDL_SCALEMODE_LINEAR;
++}
+ 
++
+ SdlWindow::SdlWindow(SDL_DisplayID id, const std::string& title, const SDL_Rect& rect,
+                      [[maybe_unused]] Uint32 flags)
+     : _initialW(rect.w), _initialH(rect.h), _displayID(id)
+@@ -224,6 +233,19 @@
+ void SdlWindow::resizeable(bool use)
+ {
+ 	SDL_SetWindowResizable(_window, use);
++
++	/* LanRDP: fixed-resolution sessions keep their aspect ratio, so a resized
++	 * window is always filled by the locally scaled image (no letterboxing). */
++	float ratio = 0.0f;
++	if (use)
++	{
++		const char* fixed = getenv("LANRDP_FIXED_SIZE");
++		unsigned int w = 0;
++		unsigned int h = 0;
++		if (fixed && (sscanf(fixed, "%ux%u", &w, &h) == 2) && (w > 0) && (h > 0))
++			ratio = static_cast<float>(w) / static_cast<float>(h);
++	}
++	std::ignore = SDL_SetWindowAspectRatio(_window, ratio, ratio);
+ 	std::ignore = SDL_SyncWindow(_window);
+ }
+ 
+@@ -357,6 +379,7 @@
+ 	}
+ 	/* Verbatim, never blended: a transparent window's alpha<0xFF regions would render black. */
+ 	std::ignore = SDL_SetTextureBlendMode(_renderTarget, SDL_BLENDMODE_NONE);
++	std::ignore = SDL_SetTextureScaleMode(_renderTarget, lanrdp_scale_mode());
+ 
+ 	/* Clear once: transparent so windows never flash black before painting. */
+ 	if (SDL_SetRenderTarget(_renderer, _renderTarget))
+@@ -620,6 +643,7 @@
+ 		return false;
+ 	}
+ 	std::ignore = SDL_SetTextureBlendMode(_gdiTexture, SDL_BLENDMODE_NONE);
++	std::ignore = SDL_SetTextureScaleMode(_gdiTexture, lanrdp_scale_mode());
+ 	_gdiTextureW = surface->w;
+ 	_gdiTextureH = surface->h;
+ 	return true;
