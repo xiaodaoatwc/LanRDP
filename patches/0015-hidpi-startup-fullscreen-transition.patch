@@ -1,0 +1,128 @@
+diff -ruN --ex a/client/SDL/SDL3/sdl_disp.cpp b/client/SDL/SDL3/sdl_disp.cpp
+--- a/client/SDL/SDL3/sdl_disp.cpp	2026-11-24 22:43:09
++++ b/client/SDL/SDL3/sdl_disp.cpp	2026-11-24 22:43:09
+@@ -73,6 +73,10 @@
+ {
+ 	WLog_DBG(TAG, "LanRDP idle poll");
+ 
++	/* Give the macOS fullscreen Space transition time to finish before touching
++	 * the window (queries/repaints during the transition can crash). */
++	if (_lastFullscreenEvent != 0 && (GetTickCount64() - _lastFullscreenEvent) < 2000)
++		return true;
+ 	/* LanRDP: called from the SDL event loop (main thread) once per second when
+ 	 * idle. macOS fullscreen Spaces may not emit window resize events when the
+ 	 * display mode changes, so the size is polled here instead of from a timer
+@@ -458,11 +462,16 @@
+ 				return true;
+ 			return _sdl->redraw(true);
+ 		case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+-			return updateMonitor(ev.windowID);
++			_lastFullscreenEvent = GetTickCount64();
++			return true;
+ 		case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+-			/* Let SDL restore the pre-fullscreen window size; the poll timer then
+-			 * reports it to the server so the session resolution follows. */
+-			return updateMonitor(ev.windowID);
++			WLog_WARN(TAG, "LanRDP leave fullscreen event");
++			/* Do not touch the window while AppKit is still running the exit-fullscreen
++			 * Space transition (querying or repainting it there can crash or deadlock).
++			 * The idle poll updates the layout after the transition settles. */
++			_lastFullscreenEvent = GetTickCount64();
++			_resizePending = true;
++			return true;
+ 
+ 		case SDL_EVENT_WINDOW_EXPOSED:
+ 		case SDL_EVENT_WINDOW_SHOWN:
+diff -ruN --ex a/client/SDL/SDL3/sdl_disp.hpp b/client/SDL/SDL3/sdl_disp.hpp
+--- a/client/SDL/SDL3/sdl_disp.hpp	2026-11-24 22:43:09
++++ b/client/SDL/SDL3/sdl_disp.hpp	2026-11-24 22:43:09
+@@ -71,6 +71,8 @@
+ 	SdlContext* _sdl = nullptr;
+ 	DispClientContext* _disp = nullptr;
+ 	UINT64 _lastSentDate = 0;
++	UINT64 _lastFullscreenEvent = 0;
++	bool _resizePending = false;
+ 	bool _activated = false;
+ 	bool _waitingResize = false;
+ 	SDL_TimerID _timer = 0;
+diff -ruN --ex a/client/SDL/SDL3/sdl_freerdp.cpp b/client/SDL/SDL3/sdl_freerdp.cpp
+--- a/client/SDL/SDL3/sdl_freerdp.cpp	2026-11-24 22:43:09
++++ b/client/SDL/SDL3/sdl_freerdp.cpp	2026-11-24 22:43:09
+@@ -349,6 +349,8 @@
+ 						break;
+ 				}
+ 			}
++			/* Idle tick: poll the window size for fullscreen/macOS display changes. */
++			std::ignore = sdl->getDisplayChannelContext().pollWindowSize();
+ 		}
+ 		rc = 1;
+ 	}
+diff -ruN --ex a/client/SDL/SDL3/sdl_window.cpp b/client/SDL/SDL3/sdl_window.cpp
+--- a/client/SDL/SDL3/sdl_window.cpp	2026-11-24 22:43:09
++++ b/client/SDL/SDL3/sdl_window.cpp	2026-11-24 22:43:09
+@@ -58,9 +58,23 @@
+ 	float pd = SDL_GetDisplayContentScale(id);
+ 	if (pd <= 0.0f)
+ 		pd = 1.0f;
+-	const int createW = static_cast<int>(std::ceil(static_cast<float>(rect.w) / pd));
+-	const int createH = static_cast<int>(std::ceil(static_cast<float>(rect.h) / pd));
++	int createW = static_cast<int>(std::ceil(static_cast<float>(rect.w) / pd));
++	int createH = static_cast<int>(std::ceil(static_cast<float>(rect.h) / pd));
+ 
++	/* LanRDP: HiDPI sessions start at the logical desktop size, so the window size
++	 * (in points) is provided separately instead of being derived from rect. */
++	const char* windowSize = getenv("LANRDP_WINDOW_SIZE");
++	unsigned int windowW = 0;
++	unsigned int windowH = 0;
++	const bool hasWindowSize = windowSize &&
++	                           (sscanf(windowSize, "%ux%u", &windowW, &windowH) == 2) &&
++	                           (windowW > 0) && (windowH > 0);
++	if (hasWindowSize)
++	{
++		createW = static_cast<int>(windowW);
++		createH = static_cast<int>(windowH);
++	}
++
+ 	auto props = SDL_CreateProperties();
+ 	SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title.c_str());
+ 	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, rect.x);
+@@ -92,7 +106,8 @@
+ 
+ 	_renderer = SDL_CreateRenderer(_window, nullptr);
+ 
+-	std::ignore = resizeToScale();
++	if (!hasWindowSize)
++		std::ignore = resizeToScale();
+ 
+ 	_monitor = query(_window, id, true);
+ }
+@@ -249,7 +264,11 @@
+ 	 * Never constrain fullscreen windows. */
+ 	const bool fs = _window && ((SDL_GetWindowFlags(_window) & SDL_WINDOW_FULLSCREEN) != 0);
+ 	const float ratio = (use && !fs) ? lanrdp_fixed_aspect() : 0.0f;
+-	std::ignore = SDL_SetWindowAspectRatio(_window, ratio, ratio);
++	/* Only ever set a real constraint: calling setContentAspectRatio with 0,0
++	 * leaves the NSWindow in a state that can trap inside AppKit's fullscreen
++	 * exit transition. */
++	if (ratio > 0.0f)
++		std::ignore = SDL_SetWindowAspectRatio(_window, ratio, ratio);
+ 	std::ignore = SDL_SyncWindow(_window);
+ }
+ 
+@@ -271,8 +290,14 @@
+ 	std::ignore = SDL_SetWindowFullscreen(_window, enter);
+ 	std::ignore = SDL_SyncWindow(_window);
+ 
+-	const float aspect = enter ? 0.0f : lanrdp_fixed_aspect();
+-	std::ignore = SDL_SetWindowAspectRatio(_window, aspect, aspect);
++	/* Restore the fixed-resolution aspect constraint when coming back; never
++	 * clear it with 0,0 (AppKit can trap in the fullscreen exit transition). */
++	if (!enter)
++	{
++		const float aspect = lanrdp_fixed_aspect();
++		if (aspect > 0.0f)
++			std::ignore = SDL_SetWindowAspectRatio(_window, aspect, aspect);
++	}
+ 
+ 	/* Only restore to the usable desktop when we really left fullscreen.
+ 	 * post_connect() calls setFullscreen(false) for normal windowed

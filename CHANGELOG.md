@@ -3,6 +3,23 @@
 All notable changes to LanRDP are documented here.
 LanRDP 的主要变更记录在这里。
 
+## 1.14.7 — 2026-11-24
+
+### 中文
+
+- 修复退出全屏后卡死（彩虹球）或崩溃：不再用 0×0 清空窗口宽高比，并避免在 macOS
+  全屏 Space 转场期间操作窗口；转场结束后再同步远程分辨率。
+- HiDPI 窗口/固定分辨率模式改为按逻辑尺寸建立会话、窗口尺寸单独指定：连接瞬间不再先以
+  高分辨率渲染再切换到 HiDPI。
+
+### English
+
+- Fixed the hang (beach ball) or crash after leaving fullscreen: the window aspect ratio is no longer
+  cleared with 0×0, and the client no longer touches the window while macOS is running the fullscreen
+  Space transition; the remote resolution is synced after the transition finishes.
+- HiDPI window/fixed modes now create the session at the logical size with a separately specified
+  window size, so connecting no longer renders at a high resolution first and then switches.
+
 ## 1.14.6 — 2026-11-20
 
 ### 中文

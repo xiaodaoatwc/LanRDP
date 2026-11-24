@@ -147,10 +147,10 @@ enum RDPLauncher {
             }
         case .fitWindow:
             if hiDPI {
-                // Window size stays in points; the session is the logical size
-                // (dynamic resolution reports window pixels / scale).
-                args.append("/w:\(max(Int((Double(max(pc.width, 640)) * scale).rounded()), 640))")
-                args.append("/h:\(max(Int((Double(max(pc.height, 480)) * scale).rounded()), 480))")
+                // The session starts at the logical size (no initial resize); the
+                // window size in points is passed via LANRDP_WINDOW_SIZE.
+                args.append("/w:\(max(pc.width, 640))")
+                args.append("/h:\(max(pc.height, 480))")
                 args.append("+dynamic-resolution")
             } else {
                 args.append("/w:\(max(pc.width, 640))")
@@ -165,8 +165,8 @@ enum RDPLauncher {
             // The display-control layout is pinned to the configured size through
             // LANRDP_FIXED_SIZE (set by Store.launch).
             if hiDPI {
-                args.append("/w:\(max(Int((Double(max(pc.width, 640)) * scale).rounded()), 640))")
-                args.append("/h:\(max(Int((Double(max(pc.height, 480)) * scale).rounded()), 480))")
+                args.append("/w:\(max(pc.width, 640))")
+                args.append("/h:\(max(pc.height, 480))")
             } else {
                 args.append("/w:\(max(pc.width, 640))")
                 args.append("/h:\(max(pc.height, 480))")

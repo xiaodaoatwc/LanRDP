@@ -661,6 +661,13 @@ final class Store: ObservableObject {
             // Ask the client to report the logical monitor size (window pixels
             // divided by the display scale, which the client reads from SDL).
             environment["LANRDP_LOGICAL_MONITOR"] = "1"
+            if pc.displayMode != .fullScreen && !pc.multiMonitor {
+                // Start the session at the logical size but keep the window at the
+                // configured point size, so the first frame already matches HiDPI
+                // (no high-resolution flash before the layout switch).
+                environment["LANRDP_WINDOW_SIZE"] =
+                    "\(max(pc.width, 640))x\(max(pc.height, 480))"
+            }
         }
         let certFile = logsDirectory.appendingPathComponent("\(pc.id.uuidString).cert")
         try? FileManager.default.removeItem(at: certFile)
